@@ -48,33 +48,30 @@ button:disabled{opacity:.42}
 #leaderboard{border-radius:8px;background:#f0f1f3;padding:5px;min-width:0}
 .lbTitle{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .lbGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-flow:column;grid-template-rows:repeat(7,minmax(0,1fr));gap:3px}
-.lbItem{background:#fff;border:1px solid #d2d6dd;border-radius:6px;padding:4px 5px;min-width:0}
+.lbItem{background:#fff;border:1px solid #d2d6dd;border-radius:6px;padding:4px 7px;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px}
 .lbItem.on{border-color:var(--accent);background:#f7faff}
 .lbItem.gk{border-color:#9ca3af}
-.lbName{font-size:12px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lbTime{font-size:16px;font-weight:950;white-space:nowrap}
+.lbName{font-size:12px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.lbTime{font-size:16px;font-weight:950;white-space:nowrap;margin-left:auto}
 #nextPlayer{border:2px solid var(--accent);border-radius:8px;padding:5px;background:var(--accent2)}
 #finalPanel{display:none;margin-top:7px}
 @media(min-width:701px) and (max-height:850px){
- .app{padding:5px}.panel{padding:5px}.top{gap:5px;margin-bottom:5px}
- .players,.finalGrid{gap:3px}.player{padding:3px}.num{width:24px;height:24px}
- .player button{min-height:23px;font-size:8px}.notice{font-size:8px}
- .balanceBody{grid-template-columns:235px minmax(0,1fr);gap:5px}
- .lbGrid{gap:2px}.lbItem{padding:3px 5px}.lbName{font-size:11px}.lbTime{font-size:14px}
+.app{padding:5px}.panel{padding:5px}.top{gap:5px;margin-bottom:5px}
+.players,.finalGrid{gap:3px}.player{padding:3px}.num{width:24px;height:24px}
+.player button{min-height:23px;font-size:8px}.notice{font-size:8px}
+.balanceBody{grid-template-columns:235px minmax(0,1fr);gap:5px}
+.lbGrid{gap:2px}.lbItem{padding:3px 6px}.lbName{font-size:11px}.lbTime{font-size:14px}
 }
 @media(max-width:700px){
- .app{padding:5px}.top,.twoCol{grid-template-columns:1fr}
- .players,.finalGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
- .clock{font-size:38px}
- .balanceBody{grid-template-columns:1fr}
- .lbGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.app{padding:5px}.top,.twoCol{grid-template-columns:1fr}
+.players,.finalGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.clock{font-size:38px}.balanceBody{grid-template-columns:1fr}
+.lbGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 </style>
 </head>
-
 <body>
 <div class="app">
-
 <div class="top">
 <section class="panel">
 <div class="row" style="justify-content:space-between">
@@ -82,10 +79,7 @@ button:disabled{opacity:.42}
 <div class="label">USCM • TEMPS DE JEU</div>
 <div class="row" style="margin-top:3px">
 <div id="clock" class="clock">00:00</div>
-<div>
-<div id="status" class="status">Prêt — 1re mi-temps</div>
-<div id="starterHelp" class="notice">Format 7 — sélectionnez 7 titulaires.</div>
-</div>
+<div><div id="status" class="status">Prêt — 1re mi-temps</div><div id="starterHelp" class="notice">Format 7 — sélectionnez 7 titulaires.</div></div>
 </div>
 </div>
 <div style="text-align:right">
@@ -95,25 +89,14 @@ button:disabled{opacity:.42}
 <div style="font-size:11px;font-weight:850">🧤 n°1 = 60′</div>
 </div>
 </div>
-
 <div class="controls">
-<button id="start" class="primary">▶ Démarrer</button>
-<button id="pause">Ⅱ Pause</button>
-<button id="half">⏱ Mi-temps</button>
-<button id="undo">↶ Annuler</button>
-<button id="new">↺ Nouveau</button>
-<button id="finish" class="primary">🏁 Fin</button>
+<button id="start" class="primary">▶ Démarrer</button><button id="pause">Ⅱ Pause</button><button id="half">⏱ Mi-temps</button><button id="undo">↶ Annuler</button><button id="new">↺ Nouveau</button><button id="finish" class="primary">🏁 Fin</button>
 </div>
 <div id="message"></div>
 </section>
-
 <section id="formatPanel" class="panel">
 <div class="label">Format du match</div>
-<div class="controls" style="margin-top:4px">
-<button id="mode7" class="primary">⚽ 7</button>
-<button id="mode9">⚽ 9</button>
-<button id="mode11">⚽ 11</button>
-</div>
+<div class="controls" style="margin-top:4px"><button id="mode7" class="primary">⚽ 7</button><button id="mode9">⚽ 9</button><button id="mode11">⚽ 11</button></div>
 <div class="row" style="justify-content:space-between;margin-top:7px">
 <div><div class="label">Terrain</div><div id="onCount" style="font-size:20px;font-weight:950">0 / 7</div></div>
 <div><div class="label">Banc</div><div id="benchCount" style="font-size:20px;font-weight:950">14</div></div>
@@ -124,416 +107,99 @@ button:disabled{opacity:.42}
 </div>
 
 <section id="balancePanel" class="panel">
-<div class="sectionTitle">
-<h2>🎯 Équilibre du temps de jeu</h2>
-<div class="count">Minimum 30′ • n°1 = 60′</div>
-</div>
+<div class="sectionTitle"><h2>🎯 Équilibre du temps de jeu</h2><div class="count">Minimum 30′ • n°1 = 60′</div></div>
 <div class="balanceBody">
-<div class="balanceAdvice">
-<div id="advice" class="notice">Sélectionne les titulaires : le classement des 14 joueuses apparaît ici.</div>
-<div id="nextPlayer" style="display:none"></div>
-<div id="targets" class="finalGrid" style="margin-top:5px"></div>
-</div>
+<div class="balanceAdvice"><div id="advice" class="notice">Sélectionne les titulaires : le classement des 14 joueuses apparaît ici.</div><div id="nextPlayer" style="display:none"></div><div id="targets" class="finalGrid" style="margin-top:5px"></div></div>
 <div id="leaderboard" aria-live="polite"></div>
 </div>
 </section>
 
 <div class="twoCol">
-<section class="panel">
-<div class="sectionTitle">
-<h2>🟢 Sur le terrain</h2>
-<div class="count">Avant match : TITULAIRE • Match : SORTIE</div>
-</div>
-<div id="onfield" class="players"></div>
-</section>
-
-<section class="panel">
-<div class="sectionTitle">
-<h2>⚪ Banc</h2>
-<div class="count">Touchez ENTRÉE</div>
-</div>
-<div id="bench" class="players"></div>
-</section>
+<section class="panel"><div class="sectionTitle"><h2>🟢 Sur le terrain</h2><div class="count">Avant match : TITULAIRE • Match : SORTIE</div></div><div id="onfield" class="players"></div></section>
+<section class="panel"><div class="sectionTitle"><h2>⚪ Banc</h2><div class="count">Touchez ENTRÉE</div></div><div id="bench" class="players"></div></section>
 </div>
 
-<section id="finalPanel" class="panel">
-<div class="sectionTitle">
-<h2>🏁 Récapitulatif final</h2>
-<div id="finalSummary" class="count"></div>
-</div>
-<div id="final"></div>
-</section>
-
+<section id="finalPanel" class="panel"><div class="sectionTitle"><h2>🏁 Récapitulatif final</h2><div id="finalSummary" class="count"></div></div><div id="final"></div></section>
 </div>
 
 <script>
 (()=>{
 const roster=[
-["1","Delphine",true],
-["2","Katia",false],
-["3","Adelina",false],
-["4","Maryline",false],
-["6","Marisol",false],
-["7","Ana Claudia",false],
-["8","Stéphanie",false],
-["10","Valentina",false],
-["11","Elodie",false],
-["12","Besa",false],
-["13","Claudia",false],
-["14","Vanessa",false],
-["17","Milene",false],
-["19","Gordana",false]
+["1","Delphine",true],["2","Katia",false],["3","Adelina",false],["4","Maryline",false],
+["6","Marisol",false],["7","Ana Claudia",false],["8","Stéphanie",false],["10","Valentina",false],
+["11","Elodie",false],["12","Besa",false],["13","Claudia",false],["14","Vanessa",false],
+["17","Milene",false],["19","Gordana",false]
 ];
-
 const DURATIONS={7:60,9:60,11:90};
-
-let players=roster.map(x=>({
-num:x[0],name:x[1],gk:x[2],on:false,segs:[]
-}));
-
-let elapsed=0;
-let running=false;
-let last=0;
-let timer=null;
-let half=1;
-let selectedOut=null;
-let history=[];
-let GAME_SIZE=7;
-let finished=false;
-
+let players=roster.map(x=>({num:x[0],name:x[1],gk:x[2],on:false,segs:[]}));
+let elapsed=0,running=false,last=0,timer=null,half=1,selectedOut=null,history=[],GAME_SIZE=7,finished=false;
 const $=id=>document.getElementById(id);
-
-function totalMinutes(){return DURATIONS[GAME_SIZE]||60;}
-
+function totalMinutes(){return DURATIONS[GAME_SIZE]||60}
 function played(p){
 let total=p.segs.reduce((a,s)=>a+Math.max(0,s.end-s.start),0);
 const active=p.segs.length&&p.segs[p.segs.length-1].end===null?p.segs[p.segs.length-1]:null;
 if(active) total+=Math.max(0,elapsed-active.start);
 return total;
 }
-
-function mm(p){return Math.floor(played(p)/60);}
-function fmt(s){
-s=Math.max(0,Math.floor(s));
-return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
-}
-function secFmt(sec){return fmt(sec);}
-function esc(s){
-return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-}
-function activeSeg(p){
-return p.segs.length&&p.segs[p.segs.length-1].end===null?p.segs[p.segs.length-1]:null;
-}
-function tick(){
-if(!running)return;
-const now=performance.now();
-elapsed+=Math.max(0,(now-last)/1000);
-last=now;
-}
-function msg(t){
-$("message").textContent=t;
-setTimeout(()=>{$("message").textContent=""},1800);
-}
-
+function mm(p){return Math.floor(played(p)/60)}
+function fmt(s){s=Math.max(0,Math.floor(s));return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0")}
+function secFmt(sec){return fmt(sec)}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+function activeSeg(p){return p.segs.length&&p.segs[p.segs.length-1].end===null?p.segs[p.segs.length-1]:null}
+function tick(){if(!running)return;const now=performance.now();elapsed+=Math.max(0,(now-last)/1000);last=now}
+function msg(t){$("message").textContent=t;setTimeout(()=>{$("message").textContent=""},1800)}
 function renderList(el,list,onfield){
 el.innerHTML="";
-if(!list.length){
-el.innerHTML='<div class="notice">Aucune joueuse dans cette zone.</div>';
-return;
-}
+if(!list.length){el.innerHTML='<div class="notice">Aucune joueuse dans cette zone.</div>';return}
 list.forEach(p=>{
 const m=mm(p),target=p.gk?60:30,rem=Math.max(0,target-m);
-const d=document.createElement("div");
-d.className="player "+(p.on?"on ":"")+(p.gk?"gk":"");
-d.innerHTML=
-'<div class="row">'+
-'<div class="num">'+esc(p.num)+'</div>'+
-'<div class="name">'+esc(p.name)+'</div>'+
-'<div class="time">'+m+'′</div>'+
-'</div>'+
-'<div class="subrow"><div>'+
-'<span class="badge">'+(p.gk?"🧤 GARDIENNE":p.on?"SUR LE TERRAIN":"BANC")+'</span> '+
-'<span class="remaining">'+(p.gk?"objectif 60′":"minimum 30′ • reste "+rem+"′")+'</span>'+
-'</div></div>'+
-'<div class="progress"><div class="fill" style="width:'+Math.min(100,m/60*100)+'%"></div></div>';
-
+const d=document.createElement("div");d.className="player "+(p.on?"on ":"")+(p.gk?"gk":"");
+d.innerHTML='<div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+'</div><div class="time">'+m+'′</div></div><div class="subrow"><div><span class="badge">'+(p.gk?"🧤 GARDIENNE":p.on?"SUR LE TERRAIN":"BANC")+'</span> <span class="remaining">'+(p.gk?"objectif 60′":"minimum 30′ • reste "+rem+"′")+'</span></div></div><div class="progress"><div class="fill" style="width:'+Math.min(100,m/60*100)+'%"></div></div>';
 const b=document.createElement("button");
-
-if(!running && !onfield){
-b.className="primary";
-b.textContent=p.on?"✓ TITULAIRE":"TITULAIRE";
-b.disabled=p.on||players.filter(x=>x.on).length>=GAME_SIZE;
-b.addEventListener("click",()=>selectStarter(p.num));
-}else{
-b.className=onfield?"":"primary";
-b.textContent=onfield?"SORTIE":"ENTRÉE";
-b.disabled=(!running)||(!onfield&&selectedOut===null);
-b.addEventListener("click",()=>onfield?chooseOut(p.num):chooseIn(p.num));
-}
-d.appendChild(b);
-el.appendChild(d);
-});
-}
-
+if(!running&&!onfield){b.className="primary";b.textContent=p.on?"✓ TITULAIRE":"TITULAIRE";b.disabled=p.on||players.filter(x=>x.on).length>=GAME_SIZE;b.addEventListener("click",()=>selectStarter(p.num))}
+else{b.className=onfield?"":"primary";b.textContent=onfield?"SORTIE":"ENTRÉE";b.disabled=(!running)||(!onfield&&selectedOut===null);b.addEventListener("click",()=>onfield?chooseOut(p.num):chooseIn(p.num))}
+d.appendChild(b);el.appendChild(d);
+})}
 function renderLeaderboard(){
-const lb=$("leaderboard");
-const startersSelected=players.some(p=>p.on);
-if(!(running||elapsed>0||finished||startersSelected)){
-lb.style.display="none";
-lb.innerHTML="";
-return;
-}
-const sorted=[...players].sort((a,b)=>{
-const d=played(b)-played(a);
-return d!==0?d:a.name.localeCompare(b.name,"fr");
-});
+const lb=$("leaderboard"),startersSelected=players.some(p=>p.on);
+if(!(running||elapsed>0||finished||startersSelected)){lb.style.display="none";lb.innerHTML="";return}
+const sorted=[...players].sort((a,b)=>{const d=played(b)-played(a);return d!==0?d:a.name.localeCompare(b.name,"fr")});
 lb.style.display="block";
-lb.innerHTML=
-'<div class="lbTitle">'+
-'<span class="label">TEMPS DE JEU EFFECTIF — DU PLUS AU MOINS</span>'+
-'<span class="count">14 joueuses • en direct</span>'+
-'</div>'+
-'<div class="lbGrid">'+
-sorted.map(p=>
-'<div class="lbItem '+(p.on?"on ":"")+(p.gk?"gk":"")+'">'+
-'<div class="lbName">'+esc(p.name)+(p.gk?" 🧤":"")+'</div>'+
-'<div class="lbTime">'+secFmt(played(p))+'</div>'+
-'</div>'
-).join("")+
-'</div>';
+lb.innerHTML='<div class="lbTitle"><span class="label">TEMPS DE JEU EFFECTIF — DU PLUS AU MOINS</span><span class="count">14 joueuses • en direct</span></div><div class="lbGrid">'+
+sorted.map(p=>'<div class="lbItem '+(p.on?"on ":"")+(p.gk?"gk":"")+'"><div class="lbName">'+esc(p.name)+(p.gk?" 🧤":"")+'</div><div class="lbTime">'+secFmt(played(p))+'</div></div>').join("")+'</div>';
 }
-
 function renderAdvice(){
 const deficits=players.filter(p=>!p.gk&&mm(p)<30).map(p=>({p,need:Math.max(0,30-mm(p))})).sort((a,b)=>b.need-a.need);
 const advice=$("advice"),next=$("nextPlayer"),targets=$("targets");
-
-if(!running){
-advice.textContent=finished?"Match terminé. Consulte le récapitulatif ci-dessous.":"Sélectionne les titulaires : le classement des 14 joueuses apparaît ici.";
-next.style.display="none";
-targets.innerHTML="";
-return;
-}
-
-if(!deficits.length){
-advice.textContent="✓ Toutes les joueuses de champ ont atteint le minimum de 30′. Tu peux maintenant chercher l’équilibre entre les temps de jeu.";
-next.style.display="none";
-targets.innerHTML="";
-return;
-}
-
-const benchCandidates=deficits.filter(x=>!x.p.on);
-const candidate=benchCandidates[0];
-const matchTargetSeconds=totalMinutes()*60;
-const remainingMatch=Math.max(0,matchTargetSeconds-elapsed);
-const availableSlots=remainingMatch*GAME_SIZE;
-const totalNeed=deficits.reduce((a,x)=>a+x.need*60,0);
-
-let feasibility="";
-if(totalNeed>availableSlots+30) feasibility=" ⚠️ Le minimum de 30′ pour tout le monde devient mathématiquement difficile avec le temps restant.";
-else if(totalNeed>availableSlots-60) feasibility=" ⚠️ Tu as très peu de marge : il faut faire tourner régulièrement.";
-
-if(candidate){
-next.style.display="block";
-next.innerHTML=
-'<div class="label">PROCHAINE ENTRÉE RECOMMANDÉE</div>'+
-'<div class="row" style="margin-top:5px">'+
-'<div class="num">'+esc(candidate.p.num)+'</div>'+
-'<div class="name" style="font-size:18px">'+esc(candidate.p.name)+'</div>'+
-'<div class="time">'+mm(candidate.p)+'′</div>'+
-'</div>'+
-'<div class="notice">Elle est actuellement parmi les moins avancées.</div>';
-advice.textContent="Pour équilibrer, privilégie "+candidate.p.name+" lors du prochain changement."+feasibility;
-}else{
-next.style.display="none";
-advice.textContent="Les joueuses les moins avancées sont déjà sur le terrain. Laisse-les jouer suffisamment avant la prochaine rotation."+feasibility;
-}
-
+if(!running){advice.textContent=finished?"Match terminé. Consulte le récapitulatif ci-dessous.":"Sélectionne les titulaires : le classement des 14 joueuses apparaît ici.";next.style.display="none";targets.innerHTML="";return}
+if(!deficits.length){advice.textContent="✓ Toutes les joueuses de champ ont atteint le minimum de 30′. Tu peux maintenant chercher l’équilibre entre les temps de jeu.";next.style.display="none";targets.innerHTML="";return}
+const candidate=deficits.filter(x=>!x.p.on)[0],matchTargetSeconds=totalMinutes()*60,remainingMatch=Math.max(0,matchTargetSeconds-elapsed),availableSlots=remainingMatch*GAME_SIZE,totalNeed=deficits.reduce((a,x)=>a+x.need*60,0);
+let feasibility="";if(totalNeed>availableSlots+30)feasibility=" ⚠️ Le minimum de 30′ pour tout le monde devient mathématiquement difficile avec le temps restant.";else if(totalNeed>availableSlots-60)feasibility=" ⚠️ Tu as très peu de marge : il faut faire tourner régulièrement.";
+if(candidate){next.style.display="block";next.innerHTML='<div class="label">PROCHAINE ENTRÉE RECOMMANDÉE</div><div class="row" style="margin-top:5px"><div class="num">'+esc(candidate.p.num)+'</div><div class="name" style="font-size:18px">'+esc(candidate.p.name)+'</div><div class="time">'+mm(candidate.p)+'′</div></div><div class="notice">Elle est actuellement parmi les moins avancées.</div>';advice.textContent="Pour équilibrer, privilégie "+candidate.p.name+" lors du prochain changement."+feasibility}
+else{next.style.display="none";advice.textContent="Les joueuses les moins avancées sont déjà sur le terrain. Laisse-les jouer suffisamment avant la prochaine rotation."+feasibility}
 targets.innerHTML="";
 }
-
 function render(){
 $("clock").textContent=fmt(elapsed);
 $("status").textContent=finished?"Match terminé — récapitulatif disponible":running?"Match en cours — mi-temps "+half:(elapsed?"Match en pause — mi-temps "+half:"Prêt — 1re mi-temps");
 $("onCount").textContent=players.filter(p=>p.on).length+" / "+GAME_SIZE;
 $("benchCount").textContent=players.filter(p=>!p.on).length;
 $("starterHelp").textContent=running?"Pendant le match : SORTIE → ENTRÉE • chrono continu.":"Format "+GAME_SIZE+" — sélectionnez "+GAME_SIZE+" titulaires avant de démarrer.";
-$("matchDuration").textContent=totalMinutes()+"′ + arrêts";
-$("liveDuration").textContent="Match "+totalMinutes()+"′ + arrêts";
-renderList($("onfield"),players.filter(p=>p.on),true);
-renderList($("bench"),players.filter(p=>!p.on),false);
-renderLeaderboard();
-renderAdvice();
+$("matchDuration").textContent=totalMinutes()+"′ + arrêts";$("liveDuration").textContent="Match "+totalMinutes()+"′ + arrêts";
+renderList($("onfield"),players.filter(p=>p.on),true);renderList($("bench"),players.filter(p=>!p.on),false);renderLeaderboard();renderAdvice();
 }
-
-function selectStarter(num){
-if(running)return;
-const p=players.find(x=>x.num===num);
-if(!p||p.on)return;
-if(players.filter(x=>x.on).length>=GAME_SIZE){
-msg("Les "+GAME_SIZE+" titulaires sont déjà sélectionnées.");
-return;
-}
-p.on=true;
-render();
-}
-
-function setMode(size){
-if(running){msg("Change le format avant de démarrer.");return;}
-GAME_SIZE=size;
-players.forEach(p=>{p.on=false;p.segs=[];});
-selectedOut=null;history=[];finished=false;
-$("finalPanel").style.display="none";
-$("finish").disabled=false;
-["mode7","mode9","mode11"].forEach(id=>$(id).classList.remove("primary"));
-$("mode"+size).classList.add("primary");
-render();
-}
-
-function chooseOut(num){
-if(!running){msg("Le chrono doit être en marche.");return;}
-tick();
-const p=players.find(x=>x.num===num);
-if(!p||!p.on)return;
-if(p.gk){msg("Delphine n°1 est la gardienne : objectif 60′.");return;}
-const s=activeSeg(p);
-if(s)s.end=elapsed;
-p.on=false;
-selectedOut=num;
-render();
-}
-
-function chooseIn(num){
-if(!running){msg("Le chrono doit être en marche.");return;}
-if(selectedOut===null){msg("Choisis d'abord la joueuse qui sort.");return;}
-const inn=players.find(x=>x.num===num);
-const out=players.find(x=>x.num===selectedOut);
-if(!inn||!out||inn.on)return;
-if(inn.gk){msg("La n°1 est la gardienne et joue 60′.");return;}
-if(players.filter(p=>p.on).length>=GAME_SIZE){msg("Il faut une sortie avant une entrée.");return;}
-
-tick();
-inn.on=true;
-inn.segs.push({start:elapsed,end:null});
-history.push({out:selectedOut,inn:num,time:elapsed});
-selectedOut=null;
-render();
-}
-
-function startMatch(){
-if(finished){msg("Match terminé. Utilise Nouveau pour recommencer.");return;}
-if(running)return;
-if(players.filter(p=>p.on).length!==GAME_SIZE){
-msg("Sélectionne exactement "+GAME_SIZE+" titulaires avant de démarrer.");
-return;
-}
-running=true;
-last=performance.now();
-players.filter(p=>p.on).forEach(p=>{
-if(!activeSeg(p))p.segs.push({start:elapsed,end:null});
-});
-timer=setInterval(()=>{tick();render();},500);
-render();
-}
-
-function pauseMatch(){
-if(finished||!running)return;
-tick();
-running=false;
-clearInterval(timer);
-players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed;});
-render();
-}
-
-function halfMatch(){
-if(finished)return;
-if(running){
-tick();
-running=false;
-clearInterval(timer);
-players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed;});
-}
-half=half===1?2:1;
-selectedOut=null;
-render();
-}
-
-function undoChange(){
-if(finished){msg("Le match est terminé.");return;}
-if(!history.length){msg("Aucun changement à annuler.");return;}
-const h=history.pop();
-const inn=players.find(p=>p.num===h.inn);
-const out=players.find(p=>p.num===h.out);
-if(inn){
-const s=activeSeg(inn);
-if(s)s.end=h.time;
-inn.on=false;
-}
-if(out){
-out.on=true;
-out.segs.push({start:h.time,end:null});
-}
-selectedOut=null;
-render();
-}
-
-function finishMatch(){
-if(finished)return;
-if(running){
-tick();
-running=false;
-clearInterval(timer);
-players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed;});
-}
-finished=true;
-selectedOut=null;
-
-const sorted=[...players].sort((a,b)=>played(b)-played(a));
-const eligible=players.filter(p=>p.gk?played(p)>=60*60:played(p)>=30*60).length;
-
-$("finalSummary").textContent=eligible+" / "+players.length+" objectifs atteints";
-
-$("final").innerHTML=
-'<div class="notice" style="margin-bottom:7px">'+
-'<strong>Objectifs :</strong> joueuses de champ ≥ 30′ • gardienne n°1 = 60′. '+
-'Le temps affiché est le temps réellement joué, hors périodes passées sur le banc.'+
-'</div>'+
-'<div class="finalGrid">'+
-sorted.map(p=>{
-const sec=played(p),m=Math.floor(sec/60),target=p.gk?60:30,cls=m>=target?"ok":"low",rem=Math.max(0,target-m);
-return '<div class="finalRow '+cls+'">'+
-'<div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+'</div><div class="big">'+secFmt(sec)+'</div></div>'+
-'<div class="notice">'+(p.gk?"🧤 Objectif 60′":m>=target?"✓ Minimum 30′ atteint":"⚠ Il manque "+rem+"′")+'</div>'+
-'</div>';
-}).join("")+
-'</div>';
-
-$("finalPanel").style.display="block";
-$("finish").disabled=true;
-render();
-}
-
-$("start").onclick=startMatch;
-$("pause").onclick=pauseMatch;
-$("half").onclick=halfMatch;
-$("undo").onclick=undoChange;
-$("new").onclick=()=>{
-if(!confirm("Réinitialiser le match et tous les temps ?"))return;
-running=false;
-clearInterval(timer);
-elapsed=0;half=1;selectedOut=null;history=[];finished=false;
-$("finalPanel").style.display="none";
-$("finish").disabled=false;
-players.forEach(p=>{p.on=false;p.segs=[];});
-render();
-};
-$("finish").onclick=finishMatch;
-$("mode7").onclick=()=>setMode(7);
-$("mode9").onclick=()=>setMode(9);
-$("mode11").onclick=()=>setMode(11);
-
-setMode(7);
-render();
-
+function selectStarter(num){if(running)return;const p=players.find(x=>x.num===num);if(!p||p.on)return;if(players.filter(x=>x.on).length>=GAME_SIZE){msg("Les "+GAME_SIZE+" titulaires sont déjà sélectionnées.");return}p.on=true;render()}
+function setMode(size){if(running){msg("Change le format avant de démarrer.");return}GAME_SIZE=size;players.forEach(p=>{p.on=false;p.segs=[]});selectedOut=null;history=[];finished=false;$("finalPanel").style.display="none";$("finish").disabled=false;["mode7","mode9","mode11"].forEach(id=>$(id).classList.remove("primary"));$("mode"+size).classList.add("primary");render()}
+function chooseOut(num){if(!running){msg("Le chrono doit être en marche.");return}tick();const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg("Delphine n°1 est la gardienne : objectif 60′.");return}const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;selectedOut=num;render()}
+function chooseIn(num){if(!running){msg("Le chrono doit être en marche.");return}if(selectedOut===null){msg("Choisis d'abord la joueuse qui sort.");return}const inn=players.find(x=>x.num===num);const out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on)return;if(inn.gk){msg("La n°1 est la gardienne et joue 60′.");return}if(players.filter(p=>p.on).length>=GAME_SIZE){msg("Il faut une sortie avant une entrée.");return}tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});selectedOut=null;render()}
+function startMatch(){if(finished){msg("Match terminé. Utilise Nouveau pour recommencer.");return}if(running)return;if(players.filter(p=>p.on).length!==GAME_SIZE){msg("Sélectionne exactement "+GAME_SIZE+" titulaires avant de démarrer.");return}running=true;last=performance.now();players.filter(p=>p.on).forEach(p=>{if(!activeSeg(p))p.segs.push({start:elapsed,end:null})});timer=setInterval(()=>{tick();render()},500);render()}
+function pauseMatch(){if(finished||!running)return;tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed});render()}
+function halfMatch(){if(finished)return;if(running){tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})}half=half===1?2:1;selectedOut=null;render()}
+function undoChange(){if(finished){msg("Le match est terminé.");return}if(!history.length){msg("Aucun changement à annuler.");return}const h=history.pop(),inn=players.find(p=>p.num===h.inn),out=players.find(p=>p.num===h.out);if(inn){const s=activeSeg(inn);if(s)s.end=h.time;inn.on=false}if(out){out.on=true;out.segs.push({start:h.time,end:null})}selectedOut=null;render()}
+function finishMatch(){if(finished)return;if(running){tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})}finished=true;selectedOut=null;const sorted=[...players].sort((a,b)=>played(b)-played(a)),eligible=players.filter(p=>p.gk?played(p)>=60*60:played(p)>=30*60).length;$("finalSummary").textContent=eligible+" / "+players.length+" objectifs atteints";$("final").innerHTML='<div class="notice" style="margin-bottom:7px"><strong>Objectifs :</strong> joueuses de champ ≥ 30′ • gardienne n°1 = 60′. Le temps affiché est le temps réellement joué, hors périodes passées sur le banc.</div><div class="finalGrid">'+sorted.map(p=>{const sec=played(p),m=Math.floor(sec/60),target=p.gk?60:30,cls=m>=target?"ok":"low",rem=Math.max(0,target-m);return '<div class="finalRow '+cls+'"><div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+'</div><div class="big">'+secFmt(sec)+'</div></div><div class="notice">'+(p.gk?"🧤 Objectif 60′":m>=target?"✓ Minimum 30′ atteint":"⚠ Il manque "+rem+"′")+'</div></div>'}).join("")+'</div>';$("finalPanel").style.display="block";$("finish").disabled=true;render()}
+$("start").onclick=startMatch;$("pause").onclick=pauseMatch;$("half").onclick=halfMatch;$("undo").onclick=undoChange;
+$("new").onclick=()=>{if(!confirm("Réinitialiser le match et tous les temps ?"))return;running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];finished=false;$("finalPanel").style.display="none";$("finish").disabled=false;players.forEach(p=>{p.on=false;p.segs=[]});render()};
+$("finish").onclick=finishMatch;$("mode7").onclick=()=>setMode(7);$("mode9").onclick=()=>setMode(9);$("mode11").onclick=()=>setMode(11);setMode(7);render();
 })();
 </script>
 </body>
