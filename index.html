@@ -306,7 +306,7 @@ function enforceUneFormatUI(){
   const b7=$("mode7"), b9=$("mode9"), b11=$("mode11");
   if(b7){ b7.disabled=une; b7.style.display=une ? "none" : ""; }
   if(b9){ b9.disabled=une; b9.style.display=une ? "none" : ""; }
-  if(b11){ b11.disabled=false; b11.style.display=""; }
+  if(b11){ b11.disabled=une; b11.style.display=""; }
   if(une) GAME_SIZE=11;
   $("formatPanel") && $("formatPanel").classList.toggle("uneForced",une);
 }
@@ -378,10 +378,9 @@ $('start').onclick=startMatch;$('pause').onclick=pauseMatch;$('half').onclick=ha
 function finishMatch(){if(finished)return;if(running){tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})}finished=true;selectedOut=null;$('finalPanel').style.display='block';$('finish').disabled=true;render()}
 // Enhance roster modal with a match-only add option.
 $('manageRoster').insertAdjacentHTML('afterend','<button id="addMatchOnly" class="venueBtn">➕ Pour ce match</button>');$('addMatchOnly').onclick=addMatchPlayer;
-loadMatchRoster();setMode(7);render();
+if(teamKey==="one") GAME_SIZE=11; loadMatchRoster(); render();
 })();
 
-applyTeamRules();
 </script>
 </body>
 </html>
