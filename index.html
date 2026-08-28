@@ -204,6 +204,9 @@ button:disabled{opacity:.42}
 
 .player.zeroPlay{border:2px solid #d33!important;background:#fff1f1!important}
 .player.zeroPlay .time{color:#c00!important;font-weight:950}
+
+.preMatchActions{display:flex;gap:4px;flex-wrap:wrap;margin-top:2px}
+.preMatchActions button{flex:1;min-width:72px;min-height:25px;font-size:8px}
 </style>
 </head>
 <body>
@@ -454,29 +457,44 @@ function renderList(el,list,onfield){
  if(!visible.length){el.innerHTML='<div class="notice">'+(matchStarted?'Aucune joueuse convoquée dans cette zone.':'Aucune joueuse dans cette zone.')+'</div>';return}
  visible.forEach(p=>{
   const m=mm(p),target=p.gk?60:30,rem=Math.max(0,target-m),d=document.createElement('div');
-  d.className='player '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected ':'')+(!p.selected&&!p.on?'unselected':'')+(matchStarted&&p.selected&&played(p)<=0?'zeroPlay':'');
+  d.className='player '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected ':'')+(!p.selected&&!p.on?'unselected ':'')+(matchStarted&&p.selected&&played(p)<=0?'zeroPlay':'');
   d.innerHTML='<div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+playerBadges(p)+'</div><div class="time">'+m+'′</div></div><div class="subrow"><div><span class="badge">'+(p.gk?'🧤 GARDIENNE':p.on?'SUR LE TERRAIN':p.selected?'BANC':'NON CONVOQUÉE')+'</span> <span class="remaining">'+(p.gk?'objectif 60′':p.ejected?'EXCLUE':p.selected?'minimum 30′ • reste '+rem+'′':'à convoquer')+'</span></div></div><div class="progress"><div class="fill" style="width:'+Math.min(100,m/60*100)+'%"></div></div>';
-  const b=document.createElement('button');
-  if(p.ejected){b.textContent='🟥 EXCLUE';b.disabled=true}
-  else if(!matchStarted){
+  const actions=document.createElement('div');
+  actions.className='preMatchActions';
+  if(p.ejected){
+    const b=document.createElement('button');b.textContent='🟥 EXCLUE';b.disabled=true;actions.appendChild(b);
+  }else if(!matchStarted){
     if(!p.selected){
+      const b=document.createElement('button');
       b.className='primary';b.textContent='➕ CONVOQUER';
       b.disabled=players.filter(x=>x.selected).length>=(GAME_SIZE===11?18:14);
       b.onclick=()=>toggleMatchSelection(p.num);
+      actions.appendChild(b);
     }else if(p.on){
-      b.textContent='✕ RETIRER TITULAIRE';
+      const b=document.createElement('button');
+      b.textContent='✕ RETIRER';
       b.onclick=()=>removeStarter(p.num);
+      actions.appendChild(b);
     }else{
-      b.className='primary';b.textContent='✕ RETIRER CONVOQUÉE';
-      b.disabled=false;
-      b.onclick=()=>toggleMatchSelection(p.num);
+      const starter=document.createElement('button');
+      starter.className='primary';starter.textContent='⚽ TITULAIRE';
+      starter.disabled=players.filter(x=>x.on).length>=GAME_SIZE;
+      starter.onclick=()=>selectStarter(p.num);
+      actions.appendChild(starter);
+
+      const remove=document.createElement('button');
+      remove.textContent='✕ RETIRER';
+      remove.onclick=()=>toggleMatchSelection(p.num);
+      actions.appendChild(remove);
     }
   }else{
+    const b=document.createElement('button');
     b.textContent=onfield?'SORTIE':'ENTRÉE';
     b.disabled=(!running&&half!==2)||(!onfield&&selectedOut===null)||!p.selected;
     b.onclick=()=>onfield?chooseOut(p.num):chooseIn(p.num);
+    actions.appendChild(b);
   }
-  d.appendChild(b);
+  d.appendChild(actions);
   if(!p.ejected && p.selected){
    const g=document.createElement('button');
    g.textContent=p.gk?'🧤 Gardienne':'🧤';
