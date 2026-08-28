@@ -367,7 +367,14 @@ function loadTeams(){
   const base=getBaseTeams();
   try{
     const saved=JSON.parse(localStorage.getItem(STORAGE));
-    if(validTeams(saved))return saved;
+    if(validTeams(saved)){
+      // Sécurité contre un ancien mélange des deux contingents.
+      let fixed=cloneTeams(saved), changed=false;
+      if(!looksLikeUne(fixed.one)){ fixed.one=cloneTeams(base.one); changed=true; }
+      if(!looksLike28(fixed.plus28)){ fixed.plus28=cloneTeams(base.plus28); changed=true; }
+      if(changed)try{localStorage.setItem(STORAGE,JSON.stringify(fixed))}catch(e){}
+      return fixed;
+    }
   }catch(e){}
   const fresh=cloneTeams(base);
   try{localStorage.setItem(STORAGE,JSON.stringify(fresh))}catch(e){}
