@@ -90,6 +90,43 @@ button:disabled{opacity:.42}
 .modalGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
 .modalGrid button{min-height:34px;font-size:11px}
 .modalCancel{margin-top:5px;width:100%}
+
+/* Version compacte iPad */
+.top{grid-template-columns:minmax(0,1fr) 300px}
+.scoreBox{display:flex;align-items:center;gap:7px;margin-left:10px}
+.score{font-size:25px;font-weight:950;letter-spacing:-1px;white-space:nowrap}
+.scoreSep{font-size:18px;font-weight:900;color:var(--muted)}
+.scoreLabel{font-size:8px;color:var(--muted);font-weight:850;text-transform:uppercase}
+#formatPanel{transition:none}
+#formatPanel.compactHidden{display:none}
+.top.compact{grid-template-columns:1fr}
+.top.compact section:first-child{padding-bottom:5px}
+.balanceBody{display:block}
+.balanceAdvice{display:none!important}
+#leaderboard{padding:4px}
+.lbGrid{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-flow:column;grid-template-rows:repeat(7,minmax(0,1fr));gap:2px}
+.lbItem{padding:3px 7px}
+.lbName{font-size:11px}.lbTime{font-size:14px}
+.eventLayout{grid-template-columns:1fr 1fr;gap:5px;margin-top:4px}
+.events{padding:4px}
+.eventButtons{gap:2px;margin-bottom:2px}.eventBtn{min-height:25px;font-size:14px;padding:1px}
+.eventList{max-height:78px;grid-template-columns:1fr 1fr;gap:2px}
+.eventItem{padding:2px 4px;font-size:8px;min-height:18px}
+.eventItem .evtTime{font-size:8px}
+.twoCol{gap:5px}
+.player{padding:3px}.player button{min-height:23px;font-size:8px}
+.sectionTitle h2{font-size:12px}
+.recapPanel{display:none}
+.recapPanel.open{display:block}
+.dashboard.hidden{display:none}
+.recapGrid{display:grid;grid-template-columns:52px 95px minmax(0,1fr) 55px;gap:2px;font-size:10px}
+.recapRow{display:contents}.recapCell{background:#fff;border-bottom:1px solid var(--line);padding:3px 4px;min-width:0}.recapHead .recapCell{font-weight:900;background:#eef2f7}.recapType{font-weight:850}.in{color:#14833b;font-weight:900}.out{color:#b32626;font-weight:900}
+.recapEmpty{padding:10px;color:var(--muted);font-size:10px}
+@media(min-width:701px) and (max-height:850px){
+ .app{padding:4px}.panel{padding:4px}.top{gap:4px;margin-bottom:4px}.clock{font-size:34px}.controls{gap:4px;margin-top:4px}.controls button{min-height:28px;padding:3px 7px}.notice{font-size:8px}
+ .balancePanel .panel{padding:4px}
+ .eventLayout{margin-top:3px}.eventList{max-height:70px}.events{padding:3px}
+}
 </style>
 </head>
 <body>
@@ -100,6 +137,7 @@ button:disabled{opacity:.42}
 <div>
 <div class="label">USCM • TEMPS DE JEU</div>
 <div class="row" style="margin-top:3px">
+<div class="scoreBox"><div><div class="score" id="score">0 — 0</div><div class="scoreLabel">USCM — adversaire</div></div></div>
 <div id="clock" class="clock">00:00</div>
 <div><div id="status" class="status">Prêt — 1re mi-temps</div><div id="starterHelp" class="notice">Format 7 — sélectionnez 7 titulaires.</div></div>
 </div>
@@ -112,7 +150,7 @@ button:disabled{opacity:.42}
 </div>
 </div>
 <div class="controls">
-<button id="start" class="primary">▶ Démarrer</button><button id="pause">Ⅱ Pause</button><button id="half">⏱ Mi-temps</button><button id="undo">↶ Annuler</button><button id="new">↺ Nouveau</button><button id="finish" class="primary">🏁 Fin</button>
+<button id="start" class="primary">▶ Démarrer</button><button id="pause">Ⅱ Pause</button><button id="half">⏱ Mi-temps</button><button id="undo">↶ Annuler</button><button id="new">↺ Nouveau</button><button id="finish" class="primary">🏁 Fin</button><button id="recapBtn">📋 Récap</button>
 </div>
 <div id="message"></div>
 </section>
@@ -127,7 +165,7 @@ button:disabled{opacity:.42}
 <div class="notice">La mi-temps est manuelle : le chrono continue pendant les arrêts de jeu.</div>
 </section>
 </div>
-
+<div id="dashboard" class="dashboard">
 <section id="balancePanel" class="panel">
 <div class="sectionTitle"><h2>🎯 Équilibre du temps de jeu</h2><div class="count">Minimum 30′ • n°1 = 60′</div></div>
 <div class="balanceBody">
@@ -151,6 +189,11 @@ button:disabled{opacity:.42}
 <div id="matchEvents" class="eventList"></div>
 </div>
 </div>
+</section>
+</div>
+<section id="recapPanel" class="panel recapPanel">
+<div class="sectionTitle"><h2>📋 Récapitulatif du match</h2><div><span id="recapScore" class="count">USCM 0 — 0 Adversaire</span> <button id="backBtn" style="min-height:24px;font-size:9px">← Retour au match</button></div></div>
+<div id="recapGrid" class="recapGrid"></div><div class="sectionTitle" style="margin-top:7px"><h2>⏱ Temps de jeu final</h2></div><div id="recapTimes" class="finalGrid"></div>
 </section>
 
 <div class="twoCol">
@@ -178,7 +221,7 @@ const roster=[
 ];
 const DURATIONS={7:60,9:60,11:90};
 let players=roster.map(x=>({num:x[0],name:x[1],gk:x[2],on:false,ejected:false,yellows:0,segs:[]}));
-let elapsed=0,running=false,last=0,timer=null,half=1,selectedOut=null,history=[],events=[],subEvents=[],GAME_SIZE=7,finished=false,pendingEvent=null;
+let elapsed=0,running=false,last=0,timer=null,half=1,selectedOut=null,history=[],events=[],subEvents=[],GAME_SIZE=7,finished=false,pendingEvent=null,scoreUSCM=0,scoreOpp=0;
 const $=id=>document.getElementById(id);
 function totalMinutes(){return DURATIONS[GAME_SIZE]||60}
 function played(p){
@@ -197,7 +240,7 @@ function msg(t){$("message").textContent=t;setTimeout(()=>{$("message").textCont
 
 function matchTimeAt(sec){return fmt(sec)}
 function eventIcon(type){return type==="goal"?"⚽":type==="penalty"?"⚽ P":type==="opp"?"🔴⚽":type==="yellow"?"🟨":"🟥"}
-function addEvent(type,p=null){events.push({type,name:p?p.name:null,time:elapsed});renderEvents()}
+function addEvent(type,p=null){events.push({type,name:p?p.name:null,time:elapsed});if(type==="goal"||type==="penalty")scoreUSCM++;if(type==="opp")scoreOpp++;renderEvents()}
 function addSub(out,inn){subEvents.push({out,inn,time:elapsed});renderEvents()}
 function eventLabel(e){
   if(e.type==="goal") return "USCM • "+e.name;
@@ -206,12 +249,26 @@ function eventLabel(e){
   if(e.type==="yellow") return e.name+" • "+(players.find(p=>p.name===e.name)?.yellows>=2?"2e jaune + 🟥":"carton jaune");
   return e.name+" • carton rouge";
 }
+
+function renderRecap(){
+ const arr=[];
+ subEvents.forEach(e=>arr.push({time:e.time,type:"Changement",detail:'<span class="in">'+esc(e.inn)+'</span> ↔ <span class="out">'+esc(e.out)+'</span>'}));
+ events.forEach(e=>arr.push({time:e.time,type:e.type==="goal"?"But USCM":e.type==="penalty"?"Pénalty":e.type==="opp"?"But adverse":e.type==="yellow"?"Carton jaune":"Carton rouge",detail:esc(eventLabel(e))}));
+ arr.sort((a,b)=>a.time-b.time);
+ $("recapScore").textContent="USCM "+scoreUSCM+" — "+scoreOpp+" Adversaire";
+ $("recapGrid").innerHTML='<div class="recapRow recapHead"><div class="recapCell">Temps</div><div class="recapCell">Type</div><div class="recapCell">Détail</div><div class="recapCell">Score</div></div>'+ (arr.length?arr.map(e=>'<div class="recapRow"><div class="recapCell">'+fmt(e.time)+'</div><div class="recapCell recapType">'+e.type+'</div><div class="recapCell">'+e.detail+'</div><div class="recapCell">'+scoreAt(e.time)+'</div></div>').join(""):'<div class="recapEmpty" style="grid-column:1/-1">Aucun événement enregistré.</div>');
+ $("recapTimes").innerHTML=[...players].sort((a,b)=>played(b)-played(a)).map(p=>'<div class="finalRow '+(played(p)>=(p.gk?3600:1800)?'ok':'low')+'"><div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+'</div><div class="big">'+secFmt(played(p))+'</div></div></div>').join("");
+}
+function scoreAt(t){let a=0,b=0;events.filter(e=>e.time<=t).sort((x,y)=>x.time-y.time).forEach(e=>{if(e.type==="goal"||e.type==="penalty")a++;if(e.type==="opp")b++});return a+" — "+b}
+function showRecap(){renderRecap();$("dashboard").classList.add("hidden");$("recapPanel").classList.add("open")}
+function hideRecap(){$("dashboard").classList.remove("hidden");$("recapPanel").classList.remove("open")}
 function renderEvents(){
   $("subCount").textContent=subEvents.length+" changement"+(subEvents.length>1?"s":"");
   $("eventCount").textContent=events.length+" événement"+(events.length>1?"s":"");
   $("subEvents").innerHTML=subEvents.length
     ?subEvents.map(e=>'<div class="eventItem"><span>🔄</span><span class="evtText">'+esc(e.inn)+' pour '+esc(e.out)+'</span><span class="evtTime">'+matchTimeAt(e.time)+'</span></div>').join("")
     :'<div class="eventEmpty">Aucun changement enregistré.</div>';
+  renderRecap();
   $("matchEvents").innerHTML=events.length
     ?[...events].reverse().map(e=>'<div class="eventItem"><span>'+eventIcon(e.type)+'</span><span class="evtText">'+esc(eventLabel(e))+'</span><span class="evtTime">'+matchTimeAt(e.time)+'</span></div>').join("")
     :'<div class="eventEmpty">Aucun événement enregistré.</div>';
@@ -293,6 +350,10 @@ targets.innerHTML="";
 }
 function render(){
 $("clock").textContent=fmt(elapsed);
+$("score").textContent=scoreUSCM+" — "+scoreOpp;
+$("formatPanel").classList.toggle("compactHidden",running||finished);
+$("formatPanel").setAttribute("aria-hidden",String(running||finished));
+$("top").classList.toggle("compact",running||finished);
 $("status").textContent=finished?"Match terminé — récapitulatif disponible":running?"Match en cours — mi-temps "+half:(elapsed?"Match en pause — mi-temps "+half:"Prêt — 1re mi-temps");
 $("onCount").textContent=players.filter(p=>p.on).length+" / "+GAME_SIZE;
 $("benchCount").textContent=players.filter(p=>!p.on).length;
@@ -301,7 +362,7 @@ $("matchDuration").textContent=totalMinutes()+"′ + arrêts";$("liveDuration").
 renderList($("onfield"),players.filter(p=>p.on),true);renderList($("bench"),players.filter(p=>!p.on),false);renderLeaderboard();renderAdvice();renderEvents();
 }
 function selectStarter(num){if(running)return;const p=players.find(x=>x.num===num);if(!p||p.on)return;if(players.filter(x=>x.on).length>=GAME_SIZE){msg("Les "+GAME_SIZE+" titulaires sont déjà sélectionnées.");return}p.on=true;render()}
-function setMode(size){if(running){msg("Change le format avant de démarrer.");return}GAME_SIZE=size;players.forEach(p=>{p.on=false;p.ejected=false;p.yellows=0;p.segs=[]});selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;$("finalPanel").style.display="none";$("finish").disabled=false;["mode7","mode9","mode11"].forEach(id=>$(id).classList.remove("primary"));$("mode"+size).classList.add("primary");render()}
+function setMode(size){if(running){msg("Change le format avant de démarrer.");return}GAME_SIZE=size;players.forEach(p=>{p.on=false;p.ejected=false;p.yellows=0;p.segs=[]});selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;$("finalPanel").style.display="none";$("finish").disabled=false;["mode7","mode9","mode11"].forEach(id=>$(id).classList.remove("primary"));$("mode"+size).classList.add("primary");render()}
 function chooseOut(num){if(!running){msg("Le chrono doit être en marche.");return}tick();const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg("Delphine n°1 est la gardienne : objectif 60′.");return}const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;selectedOut=num;render()}
 function chooseIn(num){if(!running){msg("Le chrono doit être en marche.");return}if(selectedOut===null){msg("Choisis d'abord la joueuse qui sort.");return}const inn=players.find(x=>x.num===num);const out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on)return;if(inn.gk){msg("La n°1 est la gardienne et joue 60′.");return}if(players.filter(p=>p.on).length>=GAME_SIZE){msg("Il faut une sortie avant une entrée.");return}tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});addSub(out.name,inn.name);selectedOut=null;render()}
 function startMatch(){if(finished){msg("Match terminé. Utilise Nouveau pour recommencer.");return}if(running)return;if(players.filter(p=>p.on).length!==GAME_SIZE){msg("Sélectionne exactement "+GAME_SIZE+" titulaires avant de démarrer.");return}running=true;last=performance.now();players.filter(p=>p.on&&!activeSeg(p)).forEach(p=>p.segs.push({start:elapsed,end:null}));timer=setInterval(()=>{tick();render()},500);render()}
@@ -310,8 +371,10 @@ function halfMatch(){if(finished)return;if(running){tick();running=false;clearIn
 function undoChange(){if(finished){msg("Le match est terminé.");return}if(!history.length){msg("Aucun changement à annuler.");return}const h=history.pop(),inn=players.find(p=>p.num===h.inn),out=players.find(p=>p.num===h.out);if(inn){const s=activeSeg(inn);if(s)s.end=h.time;inn.on=false}if(out){out.on=true;out.segs.push({start:h.time,end:null})}const i=subEvents.findIndex(e=>e.time===h.time&&e.out===out.name&&e.inn===inn.name);if(i>=0)subEvents.splice(i,1);selectedOut=null;render()}
 function finishMatch(){if(finished)return;if(running){tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})}finished=true;selectedOut=null;const sorted=[...players].sort((a,b)=>played(b)-played(a)),eligible=players.filter(p=>p.gk?played(p)>=60*60:played(p)>=30*60).length;$("finalSummary").textContent=eligible+" / "+players.length+" objectifs atteints";$("final").innerHTML='<div class="notice" style="margin-bottom:7px"><strong>Objectifs :</strong> joueuses de champ ≥ 30′ • gardienne n°1 = 60′. Le temps affiché est le temps réellement joué, hors périodes passées sur le banc.</div><div class="finalGrid">'+sorted.map(p=>{const sec=played(p),m=Math.floor(sec/60),target=p.gk?60:30,cls=m>=target?"ok":"low",rem=Math.max(0,target-m);return '<div class="finalRow '+cls+'"><div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+'</div><div class="big">'+secFmt(sec)+'</div></div><div class="notice">'+(p.gk?"🧤 Objectif 60′":m>=target?"✓ Minimum 30′ atteint":"⚠ Il manque "+rem+"′")+'</div></div>'}).join("")+'</div>';$("finalPanel").style.display="block";$("finish").disabled=true;render()}
 $("start").onclick=startMatch;$("pause").onclick=pauseMatch;$("half").onclick=halfMatch;$("undo").onclick=undoChange;
-$("new").onclick=()=>{if(!confirm("Réinitialiser le match et tous les temps ?"))return;running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;$("finalPanel").style.display="none";$("finish").disabled=false;players.forEach(p=>{p.on=false;p.ejected=false;p.yellows=0;p.segs=[]});render()};
+$("new").onclick=()=>{if(!confirm("Réinitialiser le match et tous les temps ?"))return;running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;$("finalPanel").style.display="none";$("finish").disabled=false;players.forEach(p=>{p.on=false;p.ejected=false;p.yellows=0;p.segs=[]});render()};
 $("finish").onclick=finishMatch;
+$("recapBtn").onclick=showRecap;
+$("backBtn").onclick=hideRecap;
 $("modalCancel").onclick=()=>{$("playerModal").classList.remove("open");pendingEvent=null};
 document.querySelectorAll("[data-event]").forEach(b=>b.onclick=()=>b.dataset.event==="opp"?recordOppGoal():openPlayerModal(b.dataset.event));
 $("mode7").onclick=()=>setMode(7);$("mode9").onclick=()=>setMode(9);$("mode11").onclick=()=>setMode(11);setMode(7);render();
