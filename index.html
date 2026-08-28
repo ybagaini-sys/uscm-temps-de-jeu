@@ -68,6 +68,28 @@ button:disabled{opacity:.42}
 .clock{font-size:38px}.balanceBody{grid-template-columns:1fr}
 .lbGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+.eventLayout{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:6px;margin-top:5px}
+.events{border-radius:8px;background:#f0f1f3;padding:5px;min-width:0}
+.eventButtons{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;margin-bottom:4px}
+.eventBtn{min-height:28px;padding:2px 3px;font-size:15px}
+.eventBtn.goal,.eventBtn.pen{border-color:#6db486;background:#eef9f1}
+.eventBtn.opp,.eventBtn.red{border-color:#d47777;background:#fff0f0}
+.eventBtn.yellow{background:#fff9dd;border-color:#e1c557}
+.eventList{display:grid;grid-template-columns:1fr 1fr;gap:2px;max-height:94px;overflow:hidden}
+.eventItem{background:#fff;border:1px solid #d2d6dd;border-radius:5px;padding:3px 5px;display:flex;align-items:center;gap:5px;min-width:0;font-size:9px;font-weight:800}
+.eventItem .evtText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.eventItem .evtTime{font-variant-numeric:tabular-nums;color:var(--muted);margin-left:auto;white-space:nowrap}
+.eventEmpty{font-size:9px;color:var(--muted);padding:5px}
+.eventCount{font-size:8px;color:var(--muted);font-weight:850}
+.player.ejected{opacity:.55;border-color:#c92d2d;background:#fff3f3}
+.modal{position:fixed;inset:0;background:rgba(23,32,51,.28);display:none;align-items:center;justify-content:center;z-index:20;padding:12px}
+.modal.open{display:flex}
+.modalCard{width:min(520px,94vw);background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:0 12px 35px rgba(0,0,0,.2)}
+.modalTitle{font-size:14px;font-weight:950;margin-bottom:5px}
+.modalGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.modalGrid button{min-height:34px;font-size:11px}
+.modalCancel{margin-top:5px;width:100%}
 </style>
 </head>
 <body>
@@ -112,6 +134,23 @@ button:disabled{opacity:.42}
 <div class="balanceAdvice"><div id="advice" class="notice">Sélectionne les titulaires : le classement des 14 joueuses apparaît ici.</div><div id="nextPlayer" style="display:none"></div><div id="targets" class="finalGrid" style="margin-top:5px"></div></div>
 <div id="leaderboard" aria-live="polite"></div>
 </div>
+<div class="eventLayout">
+<div class="events">
+<div class="sectionTitle"><h2>🔄 Changements</h2><div id="subCount" class="eventCount">0</div></div>
+<div id="subEvents" class="eventList"></div>
+</div>
+<div class="events">
+<div class="sectionTitle"><h2>⚽ Événements</h2><div id="eventCount" class="eventCount">0</div></div>
+<div class="eventButtons">
+<button class="eventBtn goal" data-event="goal" title="But USCM">⚽</button>
+<button class="eventBtn pen" data-event="penalty" title="Pénalty USCM">⚽<b style="font-size:9px"> P</b></button>
+<button class="eventBtn opp" data-event="opp" title="But adverse">🔴⚽</button>
+<button class="eventBtn yellow" data-event="yellow" title="Carton jaune">🟨</button>
+<button class="eventBtn red" data-event="red" title="Carton rouge">🟥</button>
+</div>
+<div id="matchEvents" class="eventList"></div>
+</div>
+</div>
 </section>
 
 <div class="twoCol">
@@ -122,6 +161,13 @@ button:disabled{opacity:.42}
 <section id="finalPanel" class="panel"><div class="sectionTitle"><h2>🏁 Récapitulatif final</h2><div id="finalSummary" class="count"></div></div><div id="final"></div></section>
 </div>
 
+<div id="playerModal" class="modal" role="dialog" aria-modal="true">
+<div class="modalCard">
+<div id="modalTitle" class="modalTitle">Choisir une joueuse</div>
+<div id="modalGrid" class="modalGrid"></div>
+<button class="modalCancel" id="modalCancel">Annuler</button>
+</div>
+</div>
 <script>
 (()=>{
 const roster=[
@@ -131,8 +177,8 @@ const roster=[
 ["17","Milene",false],["19","Gordana",false]
 ];
 const DURATIONS={7:60,9:60,11:90};
-let players=roster.map(x=>({num:x[0],name:x[1],gk:x[2],on:false,segs:[]}));
-let elapsed=0,running=false,last=0,timer=null,half=1,selectedOut=null,history=[],GAME_SIZE=7,finished=false;
+let players=roster.map(x=>({num:x[0],name:x[1],gk:x[2],on:false,ejected:false,yellows:0,segs:[]}));
+let elapsed=0,running=false,last=0,timer=null,half=1,selectedOut=null,history=[],events=[],subEvents=[],GAME_SIZE=7,finished=false,pendingEvent=null;
 const $=id=>document.getElementById(id);
 function totalMinutes(){return DURATIONS[GAME_SIZE]||60}
 function played(p){
@@ -148,14 +194,80 @@ function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",
 function activeSeg(p){return p.segs.length&&p.segs[p.segs.length-1].end===null?p.segs[p.segs.length-1]:null}
 function tick(){if(!running)return;const now=performance.now();elapsed+=Math.max(0,(now-last)/1000);last=now}
 function msg(t){$("message").textContent=t;setTimeout(()=>{$("message").textContent=""},1800)}
+
+function matchTimeAt(sec){return fmt(sec)}
+function eventIcon(type){return type==="goal"?"⚽":type==="penalty"?"⚽ P":type==="opp"?"🔴⚽":type==="yellow"?"🟨":"🟥"}
+function addEvent(type,p=null){events.push({type,name:p?p.name:null,time:elapsed});renderEvents()}
+function addSub(out,inn){subEvents.push({out,inn,time:elapsed});renderEvents()}
+function eventLabel(e){
+  if(e.type==="goal") return "USCM • "+e.name;
+  if(e.type==="penalty") return "USCM P • "+e.name;
+  if(e.type==="opp") return "But adverse";
+  if(e.type==="yellow") return e.name+" • "+(players.find(p=>p.name===e.name)?.yellows>=2?"2e jaune + 🟥":"carton jaune");
+  return e.name+" • carton rouge";
+}
+function renderEvents(){
+  $("subCount").textContent=subEvents.length+" changement"+(subEvents.length>1?"s":"");
+  $("eventCount").textContent=events.length+" événement"+(events.length>1?"s":"");
+  $("subEvents").innerHTML=subEvents.length
+    ?subEvents.map(e=>'<div class="eventItem"><span>🔄</span><span class="evtText">'+esc(e.inn)+' pour '+esc(e.out)+'</span><span class="evtTime">'+matchTimeAt(e.time)+'</span></div>').join("")
+    :'<div class="eventEmpty">Aucun changement enregistré.</div>';
+  $("matchEvents").innerHTML=events.length
+    ?[...events].reverse().map(e=>'<div class="eventItem"><span>'+eventIcon(e.type)+'</span><span class="evtText">'+esc(eventLabel(e))+'</span><span class="evtTime">'+matchTimeAt(e.time)+'</span></div>').join("")
+    :'<div class="eventEmpty">Aucun événement enregistré.</div>';
+}
+function openPlayerModal(type){
+  if(!running){msg("Le chrono doit être en marche.");return}
+  pendingEvent=type;
+  $("modalTitle").textContent=
+    type==="goal"?"⚽ But USCM — qui a marqué ?":
+    type==="penalty"?"⚽ Pénalty USCM — qui a marqué ?":
+    type==="yellow"?"🟨 Carton jaune — joueuse ?":"🟥 Carton rouge — joueuse ?";
+  const list=players.filter(p=>p.on&&!p.ejected);
+  $("modalGrid").innerHTML=list.map(p=>'<button data-pnum="'+p.num+'">'+esc(p.name)+'</button>').join("");
+  $("modalGrid").querySelectorAll("button").forEach(b=>b.onclick=()=>recordPlayerEvent(b.dataset.pnum));
+  $("playerModal").classList.add("open");
+}
+function recordPlayerEvent(num){
+  tick();
+  const p=players.find(x=>x.num===num);
+  if(!p||!running)return;
+  if(pendingEvent==="yellow"){
+    p.yellows++;
+    addEvent("yellow",p);
+    if(p.yellows===2){
+      p.ejected=true;
+      const s=activeSeg(p); if(s)s.end=elapsed;
+      p.on=false;
+      addEvent("red",p);
+      msg(p.name+" reçoit un 2e jaune : rouge automatique, exclusion définitive.");
+    }
+  }else if(pendingEvent==="red"){
+    p.ejected=true;
+    const s=activeSeg(p); if(s)s.end=elapsed;
+    p.on=false;
+    addEvent("red",p);
+    msg(p.name+" est exclue définitivement. Aucun remplacement.");
+  }else{
+    addEvent(pendingEvent,p);
+  }
+  pendingEvent=null;
+  $("playerModal").classList.remove("open");
+  render();
+}
+function recordOppGoal(){
+  if(!running){msg("Le chrono doit être en marche.");return}
+  tick(); addEvent("opp"); render();
+}
 function renderList(el,list,onfield){
 el.innerHTML="";
 if(!list.length){el.innerHTML='<div class="notice">Aucune joueuse dans cette zone.</div>';return}
 list.forEach(p=>{
 const m=mm(p),target=p.gk?60:30,rem=Math.max(0,target-m);
-const d=document.createElement("div");d.className="player "+(p.on?"on ":"")+(p.gk?"gk":"");
+const d=document.createElement("div");d.className="player "+(p.on?"on ":"")+(p.gk?"gk ":"")+(p.ejected?"ejected":"");
 d.innerHTML='<div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+'</div><div class="time">'+m+'′</div></div><div class="subrow"><div><span class="badge">'+(p.gk?"🧤 GARDIENNE":p.on?"SUR LE TERRAIN":"BANC")+'</span> <span class="remaining">'+(p.gk?"objectif 60′":"minimum 30′ • reste "+rem+"′")+'</span></div></div><div class="progress"><div class="fill" style="width:'+Math.min(100,m/60*100)+'%"></div></div>';
 const b=document.createElement("button");
+if(p.ejected){b.textContent="🟥 EXCLUE";b.disabled=true;d.appendChild(b);el.appendChild(d);return}
 if(!running&&!onfield){b.className="primary";b.textContent=p.on?"✓ TITULAIRE":"TITULAIRE";b.disabled=p.on||players.filter(x=>x.on).length>=GAME_SIZE;b.addEventListener("click",()=>selectStarter(p.num))}
 else{b.className=onfield?"":"primary";b.textContent=onfield?"SORTIE":"ENTRÉE";b.disabled=(!running)||(!onfield&&selectedOut===null);b.addEventListener("click",()=>onfield?chooseOut(p.num):chooseIn(p.num))}
 d.appendChild(b);el.appendChild(d);
@@ -186,20 +298,23 @@ $("onCount").textContent=players.filter(p=>p.on).length+" / "+GAME_SIZE;
 $("benchCount").textContent=players.filter(p=>!p.on).length;
 $("starterHelp").textContent=running?"Pendant le match : SORTIE → ENTRÉE • chrono continu.":"Format "+GAME_SIZE+" — sélectionnez "+GAME_SIZE+" titulaires avant de démarrer.";
 $("matchDuration").textContent=totalMinutes()+"′ + arrêts";$("liveDuration").textContent="Match "+totalMinutes()+"′ + arrêts";
-renderList($("onfield"),players.filter(p=>p.on),true);renderList($("bench"),players.filter(p=>!p.on),false);renderLeaderboard();renderAdvice();
+renderList($("onfield"),players.filter(p=>p.on),true);renderList($("bench"),players.filter(p=>!p.on),false);renderLeaderboard();renderAdvice();renderEvents();
 }
 function selectStarter(num){if(running)return;const p=players.find(x=>x.num===num);if(!p||p.on)return;if(players.filter(x=>x.on).length>=GAME_SIZE){msg("Les "+GAME_SIZE+" titulaires sont déjà sélectionnées.");return}p.on=true;render()}
-function setMode(size){if(running){msg("Change le format avant de démarrer.");return}GAME_SIZE=size;players.forEach(p=>{p.on=false;p.segs=[]});selectedOut=null;history=[];finished=false;$("finalPanel").style.display="none";$("finish").disabled=false;["mode7","mode9","mode11"].forEach(id=>$(id).classList.remove("primary"));$("mode"+size).classList.add("primary");render()}
+function setMode(size){if(running){msg("Change le format avant de démarrer.");return}GAME_SIZE=size;players.forEach(p=>{p.on=false;p.ejected=false;p.yellows=0;p.segs=[]});selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;$("finalPanel").style.display="none";$("finish").disabled=false;["mode7","mode9","mode11"].forEach(id=>$(id).classList.remove("primary"));$("mode"+size).classList.add("primary");render()}
 function chooseOut(num){if(!running){msg("Le chrono doit être en marche.");return}tick();const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg("Delphine n°1 est la gardienne : objectif 60′.");return}const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;selectedOut=num;render()}
-function chooseIn(num){if(!running){msg("Le chrono doit être en marche.");return}if(selectedOut===null){msg("Choisis d'abord la joueuse qui sort.");return}const inn=players.find(x=>x.num===num);const out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on)return;if(inn.gk){msg("La n°1 est la gardienne et joue 60′.");return}if(players.filter(p=>p.on).length>=GAME_SIZE){msg("Il faut une sortie avant une entrée.");return}tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});selectedOut=null;render()}
-function startMatch(){if(finished){msg("Match terminé. Utilise Nouveau pour recommencer.");return}if(running)return;if(players.filter(p=>p.on).length!==GAME_SIZE){msg("Sélectionne exactement "+GAME_SIZE+" titulaires avant de démarrer.");return}running=true;last=performance.now();players.filter(p=>p.on).forEach(p=>{if(!activeSeg(p))p.segs.push({start:elapsed,end:null})});timer=setInterval(()=>{tick();render()},500);render()}
+function chooseIn(num){if(!running){msg("Le chrono doit être en marche.");return}if(selectedOut===null){msg("Choisis d'abord la joueuse qui sort.");return}const inn=players.find(x=>x.num===num);const out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on)return;if(inn.gk){msg("La n°1 est la gardienne et joue 60′.");return}if(players.filter(p=>p.on).length>=GAME_SIZE){msg("Il faut une sortie avant une entrée.");return}tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});addSub(out.name,inn.name);selectedOut=null;render()}
+function startMatch(){if(finished){msg("Match terminé. Utilise Nouveau pour recommencer.");return}if(running)return;if(players.filter(p=>p.on).length!==GAME_SIZE){msg("Sélectionne exactement "+GAME_SIZE+" titulaires avant de démarrer.");return}running=true;last=performance.now();players.filter(p=>p.on&&!activeSeg(p)).forEach(p=>p.segs.push({start:elapsed,end:null}));timer=setInterval(()=>{tick();render()},500);render()}
 function pauseMatch(){if(finished||!running)return;tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed});render()}
 function halfMatch(){if(finished)return;if(running){tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})}half=half===1?2:1;selectedOut=null;render()}
-function undoChange(){if(finished){msg("Le match est terminé.");return}if(!history.length){msg("Aucun changement à annuler.");return}const h=history.pop(),inn=players.find(p=>p.num===h.inn),out=players.find(p=>p.num===h.out);if(inn){const s=activeSeg(inn);if(s)s.end=h.time;inn.on=false}if(out){out.on=true;out.segs.push({start:h.time,end:null})}selectedOut=null;render()}
+function undoChange(){if(finished){msg("Le match est terminé.");return}if(!history.length){msg("Aucun changement à annuler.");return}const h=history.pop(),inn=players.find(p=>p.num===h.inn),out=players.find(p=>p.num===h.out);if(inn){const s=activeSeg(inn);if(s)s.end=h.time;inn.on=false}if(out){out.on=true;out.segs.push({start:h.time,end:null})}const i=subEvents.findIndex(e=>e.time===h.time&&e.out===out.name&&e.inn===inn.name);if(i>=0)subEvents.splice(i,1);selectedOut=null;render()}
 function finishMatch(){if(finished)return;if(running){tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})}finished=true;selectedOut=null;const sorted=[...players].sort((a,b)=>played(b)-played(a)),eligible=players.filter(p=>p.gk?played(p)>=60*60:played(p)>=30*60).length;$("finalSummary").textContent=eligible+" / "+players.length+" objectifs atteints";$("final").innerHTML='<div class="notice" style="margin-bottom:7px"><strong>Objectifs :</strong> joueuses de champ ≥ 30′ • gardienne n°1 = 60′. Le temps affiché est le temps réellement joué, hors périodes passées sur le banc.</div><div class="finalGrid">'+sorted.map(p=>{const sec=played(p),m=Math.floor(sec/60),target=p.gk?60:30,cls=m>=target?"ok":"low",rem=Math.max(0,target-m);return '<div class="finalRow '+cls+'"><div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+'</div><div class="big">'+secFmt(sec)+'</div></div><div class="notice">'+(p.gk?"🧤 Objectif 60′":m>=target?"✓ Minimum 30′ atteint":"⚠ Il manque "+rem+"′")+'</div></div>'}).join("")+'</div>';$("finalPanel").style.display="block";$("finish").disabled=true;render()}
 $("start").onclick=startMatch;$("pause").onclick=pauseMatch;$("half").onclick=halfMatch;$("undo").onclick=undoChange;
-$("new").onclick=()=>{if(!confirm("Réinitialiser le match et tous les temps ?"))return;running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];finished=false;$("finalPanel").style.display="none";$("finish").disabled=false;players.forEach(p=>{p.on=false;p.segs=[]});render()};
-$("finish").onclick=finishMatch;$("mode7").onclick=()=>setMode(7);$("mode9").onclick=()=>setMode(9);$("mode11").onclick=()=>setMode(11);setMode(7);render();
+$("new").onclick=()=>{if(!confirm("Réinitialiser le match et tous les temps ?"))return;running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;$("finalPanel").style.display="none";$("finish").disabled=false;players.forEach(p=>{p.on=false;p.ejected=false;p.yellows=0;p.segs=[]});render()};
+$("finish").onclick=finishMatch;
+$("modalCancel").onclick=()=>{$("playerModal").classList.remove("open");pendingEvent=null};
+document.querySelectorAll("[data-event]").forEach(b=>b.onclick=()=>b.dataset.event==="opp"?recordOppGoal():openPlayerModal(b.dataset.event));
+$("mode7").onclick=()=>setMode(7);$("mode9").onclick=()=>setMode(9);$("mode11").onclick=()=>setMode(11);setMode(7);render();
 })();
 </script>
 </body>
