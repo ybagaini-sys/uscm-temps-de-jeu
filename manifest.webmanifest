@@ -1,0 +1,10 @@
+{
+  "name": "USCM — Temps de jeu",
+  "short_name": "USCM Temps",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f4f6fa",
+  "theme_color": "#356fc4",
+  "description": "Gestion des temps de jeu USCM féminin.",
+  "orientation": "landscape"
+}
