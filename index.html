@@ -189,8 +189,14 @@ button:disabled{opacity:.42}
   .finalRow{break-inside:avoid}
 }
 
-.rosterHead{display:grid;grid-template-columns:70px 1fr 105px;gap:5px;padding:3px 5px;font-size:9px;font-weight:900;color:var(--muted);border-bottom:1px solid var(--line)}
-.rosterRow .row{gap:5px}
+.rosterHead{display:grid;grid-template-columns:42px minmax(0,1fr) 92px 30px;gap:5px;padding:3px 5px;font-size:9px;font-weight:900;color:var(--muted);border-bottom:1px solid var(--line)}
+.rosterHead div:nth-child(3){text-align:center}
+.rosterHead div:nth-child(4){text-align:center}
+.rosterRow .row{display:grid;grid-template-columns:42px minmax(0,1fr) 92px 30px;gap:5px;align-items:center}
+.rosterRow .num{justify-self:start}
+.rosterRow .name{min-width:0;display:block;visibility:visible;opacity:1;font-size:11px}
+.rosterRow button{width:auto!important;min-width:0!important;box-sizing:border-box;margin-top:0!important;padding:2px 4px;font-size:8px;white-space:nowrap}
+.rosterRow [data-del]{width:30px!important;padding:2px 0}
 .matchMeta input{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;min-height:27px;padding:4px 7px;font:inherit;font-size:10px;background:#fff}
 @media print{
  .matchMeta{display:none!important}
@@ -344,6 +350,9 @@ function looksLike28(arr){
 }
 function cloneTeams(x){return JSON.parse(JSON.stringify(x))}
 function validRoster(arr){return Array.isArray(arr)&&arr.every(x=>Array.isArray(x)&&x.length>=2&&String(x[0]).trim()&&String(x[1]).trim())}
+function normalizeRoster(arr){
+ return (Array.isArray(arr)?arr:[]).filter(x=>Array.isArray(x)&&x.length>=2&&String(x[1]).trim()).map(x=>[String(x[0]??'').trim(),String(x[1]).trim()]);
+}
 function validTeams(x){return !!(x&&validRoster(x.one)&&validRoster(x.plus28))}
 function getBaseTeams(){
   try{
@@ -550,10 +559,10 @@ function resetCurrentTeamToBase(){
 }
 function openRoster(){if(matchStarted||running){msg('Le contingent ne peut être modifié après le début du match.');return}renderRosterModal();$('rosterModal').classList.add('open')}
 function renderRosterModal(){
- const t=teams[teamKey];
- $('rosterModalInfo').textContent=(teamKey==='one'?'La Une féminine':'Femmes 28+')+' • '+t.length+' joueuses. Les modifications définitives sont conservées après actualisation. Le contingent de base peut être restauré.';
- $('rosterRows').innerHTML='<div class="rosterHead"><div>N° maillot</div><div>Prénom</div><div></div></div>'+
- t.map((p,i)=>'<div class="player rosterRow" style="margin-top:3px"><div class="row"><div class="num">'+esc(p[0]||'—')+'</div><div class="name">'+esc(p[1])+'</div><button type="button" data-edit="'+i+'" style="min-height:26px;font-size:9px">✏️ Modifier</button><button type="button" data-del="'+i+'" style="min-height:26px;font-size:9px">🗑️</button></div></div>').join('');
+ const t=normalizeRoster(teams[teamKey]);
+ $('rosterModalInfo').textContent=(teamKey==='one'?'La Une féminine':'Femmes 28+')+' • '+t.length+' joueuses. N° et prénoms réels affichés ci-dessous. Les modifications définitives sont conservées après actualisation. Le contingent de base peut être restauré.';
+ $('rosterRows').innerHTML='<div class="rosterHead"><div>N°</div><div>Prénom</div><div>Modifier</div><div></div></div>'+
+ t.map((p,i)=>'<div class="player rosterRow" style="margin-top:3px"><div class="row"><div class="num">'+esc(p[0]||'—')+'</div><div class="name">'+esc(p[1])+'</div><button type="button" data-edit="'+i+'" style="min-height:26px">✏️ Modifier</button><button type="button" data-del="'+i+'" aria-label="Supprimer" title="Supprimer" style="min-height:26px">🗑️</button></div></div>').join('');
 $('rosterRows').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editRoster(+b.dataset.edit));$('rosterRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteRoster(+b.dataset.del))}$('rosterRows').parentElement.querySelector('#rosterResetArea')?.remove();$('rosterRows').insertAdjacentHTML('afterend','<div id="rosterResetArea" style="display:flex;gap:4px;margin-top:5px"><button type="button" id="resetCurrentRoster" style="min-height:27px;font-size:9px">↺ Restaurer le contingent de base</button></div>');$('resetCurrentRoster').onclick=()=>{if(confirm('Restaurer le contingent de base de cette équipe ? Les modifications permanentes de cette équipe seront perdues.'))resetCurrentTeamToBase();renderRosterModal()}
 function editRoster(i){const p=teams[teamKey][i];const name=prompt('Prénom de la joueuse',p[1]);if(name===null)return;if(!name.trim()){msg('Le prénom est obligatoire.');return}const num=prompt('Nouveau numéro de maillot',p[0]||'');if(num===null||!num.trim())return;const scope=prompt('Modification du numéro :\nD = définitive (contingent)\nP = provisoire (ce match uniquement)','D');if(scope===null)return;const mode=scope.trim().toUpperCase();if(mode!=='D'&&mode!=='P'){msg('Choisis D pour définitive ou P pour provisoire.');return}if(mode==='D'){if(teams[teamKey].some((x,j)=>j!==i&&x[0]===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}teams[teamKey][i]=[num.trim(),name.trim()];saveTeams()}else{const oldNum=p[0],cur=players.find(x=>x.num===oldNum&&x.name===p[1]);if(cur){if(players.some(x=>x!==cur&&x.num===num.trim())){msg('Ce numéro existe déjà pour ce match.');return}cur.num=num.trim();cur.name=name.trim()}else{msg('La modification provisoire s’appliquera au prochain chargement du match.');}}renderRosterModal();render()}
 function deleteRoster(i){const p=teams[teamKey][i];if(!confirm('Supprimer définitivement '+p[1]+' du contingent ?'))return;teams[teamKey].splice(i,1);saveTeams();renderRosterModal();render()}
