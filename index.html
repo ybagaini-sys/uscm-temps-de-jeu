@@ -366,27 +366,55 @@ function renderRecap(){const arr=[];subEvents.forEach(e=>arr.push({time:e.time,t
 function showRecap(){$('dashboard').classList.add('hidden');$('recapPanel').classList.add('open');renderRecap()}function hideRecap(){$('dashboard').classList.remove('hidden');$('recapPanel').classList.remove('open')}
 function renderList(el,list,onfield){
  el.innerHTML='';
- if(!list.length){el.innerHTML='<div class="notice">Aucune joueuse dans cette zone.</div>';return}
- list.forEach(p=>{
+ const visible=list.filter(p=>!matchStarted || p.selected);
+ if(!visible.length){el.innerHTML='<div class="notice">'+(matchStarted?'Aucune joueuse convoquée dans cette zone.':'Aucune joueuse dans cette zone.')+'</div>';return}
+ visible.forEach(p=>{
   const m=mm(p),target=p.gk?60:30,rem=Math.max(0,target-m),d=document.createElement('div');
   d.className='player '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected ':'')+(!p.selected&&!p.on?'unselected':'');
   d.innerHTML='<div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+playerBadges(p)+'</div><div class="time">'+m+'′</div></div><div class="subrow"><div><span class="badge">'+(p.gk?'🧤 GARDIENNE':p.on?'SUR LE TERRAIN':p.selected?'BANC':'NON CONVOQUÉE')+'</span> <span class="remaining">'+(p.gk?'objectif 60′':p.ejected?'EXCLUE':p.selected?'minimum 30′ • reste '+rem+'′':'à convoquer')+'</span></div></div><div class="progress"><div class="fill" style="width:'+Math.min(100,m/60*100)+'%"></div></div>';
   const b=document.createElement('button');
   if(p.ejected){b.textContent='🟥 EXCLUE';b.disabled=true}
   else if(!matchStarted){
-    if(!p.selected){b.className='primary';b.textContent='➕ CONVOQUER';b.disabled=players.filter(x=>x.selected).length>=(GAME_SIZE===11?18:14);b.onclick=()=>toggleMatchSelection(p.num)}
-    else {b.className='primary';b.textContent=p.on?'✓ TITULAIRE':'TITULAIRE';b.disabled=p.on||players.filter(x=>x.on).length>=GAME_SIZE;b.onclick=()=>selectStarter(p.num)}
-  } else {b.textContent=onfield?'SORTIE':'ENTRÉE';b.disabled=!running||(!onfield&&selectedOut===null)||!p.selected;b.onclick=()=>onfield?chooseOut(p.num):chooseIn(p.num)}
+    if(!p.selected){
+      b.className='primary';b.textContent='➕ CONVOQUER';
+      b.disabled=players.filter(x=>x.selected).length>=(GAME_SIZE===11?18:14);
+      b.onclick=()=>toggleMatchSelection(p.num);
+    }else if(p.on){
+      b.textContent='✕ RETIRER TITULAIRE';
+      b.onclick=()=>removeStarter(p.num);
+    }else{
+      b.className='primary';b.textContent='✓ TITULAIRE';
+      b.disabled=players.filter(x=>x.on).length>=GAME_SIZE;
+      b.onclick=()=>selectStarter(p.num);
+    }
+  }else{
+    b.textContent=onfield?'SORTIE':'ENTRÉE';
+    b.disabled=!running||(!onfield&&selectedOut===null)||!p.selected;
+    b.onclick=()=>onfield?chooseOut(p.num):chooseIn(p.num);
+  }
   d.appendChild(b);
-  if(!p.ejected && (p.selected||!matchStarted)){
-   const g=document.createElement('button');g.textContent=p.gk?'🧤 Gardienne':'🧤';g.title=p.gk?'Gardienne actuelle':'Désigner gardienne';g.style.marginTop='2px';g.style.fontSize='8px';g.disabled=false;g.onclick=()=>changeGoalkeeper(p.num);d.appendChild(g)
+  if(!p.ejected && p.selected){
+   const g=document.createElement('button');
+   g.textContent=p.gk?'🧤 Gardienne':'🧤';
+   g.title=p.gk?'Gardienne actuelle':'Désigner gardienne';
+   g.style.marginTop='2px';g.style.fontSize='8px';g.disabled=false;
+   g.onclick=()=>changeGoalkeeper(p.num);
+   d.appendChild(g)
   }
   el.appendChild(d)
  })
 }
+function removeStarter(num){
+  if(matchStarted)return;
+  const p=players.find(x=>x.num===num);
+  if(!p||!p.on)return;
+  p.on=false;
+  if(p.gk){p.gk=false;gkNum=null}
+  render();
+}
 function toggleMatchSelection(num){if(matchStarted)return;const p=players.find(x=>x.num===num);if(!p)return;const max=GAME_SIZE===11?18:14;if(!p.selected&&players.filter(x=>x.selected).length>=max){msg('Maximum de '+max+' joueuses convoquées pour ce format.');return}p.selected=!p.selected;p.on=false;render()}
 function render(){
- $('clock').textContent=fmt(elapsed);$('score').textContent=isHome?scoreUSCM+' — '+scoreOpp:scoreOpp+' — '+scoreUSCM;$('scoreLabel').textContent=isHome?'USCM — adversaire':'Adversaire — USCM';$('formatPanel').classList.toggle('compactHidden',matchStarted||finished);$('top').classList.toggle('compact',running||finished);$('homeBtn').classList.toggle('primary',isHome);$('awayBtn').classList.toggle('primary',!isHome);$('teamOne').classList.toggle('primary',teamKey==='one');$('team28').classList.toggle('primary',teamKey==='plus28');$('status').textContent=finished?'Match terminé — récapitulatif disponible':running?'Match en cours — mi-temps '+half:(elapsed?'Match en pause — mi-temps '+half:'Prêt — 1re mi-temps');$('onCount').textContent=players.filter(p=>p.on).length+' / '+GAME_SIZE;$('benchCount').textContent=players.filter(p=>p.selected&&!p.on).length+' / '+(GAME_SIZE===11?18:14);$('starterHelp').textContent=running?'Pendant le match : SORTIE → ENTRÉE • chrono continu.':'Format '+GAME_SIZE+' — convoquez jusqu’à '+(GAME_SIZE===11?18:14)+' joueuses puis sélectionnez '+GAME_SIZE+' titulaires.';$('matchDuration').textContent=totalMinutes()+'′ + arrêts';$('liveDuration').textContent='Match '+totalMinutes()+'′ + arrêts';$('rosterInfo').textContent='Contingent : '+teams[teamKey].length+' joueuses • Convoquées : '+players.filter(p=>p.selected).length+' / '+(GAME_SIZE===11?18:14)+' • Gardienne : '+(players.find(p=>p.gk)?.name||'à définir');renderList($('onfield'),players.filter(p=>p.on),true);renderList($('bench'),players.filter(p=>!p.on),false);renderLeaderboard();renderEvents()}
+ $('clock').textContent=fmt(elapsed);$('score').textContent=isHome?scoreUSCM+' — '+scoreOpp:scoreOpp+' — '+scoreUSCM;$('scoreLabel').textContent=isHome?'USCM — adversaire':'Adversaire — USCM';$('formatPanel').classList.toggle('compactHidden',matchStarted||finished);$('top').classList.toggle('compact',running||finished);$('homeBtn').classList.toggle('primary',isHome);$('awayBtn').classList.toggle('primary',!isHome);$('teamOne').classList.toggle('primary',teamKey==='one');$('team28').classList.toggle('primary',teamKey==='plus28');$('status').textContent=finished?'Match terminé — récapitulatif disponible':running?'Match en cours — mi-temps '+half:(elapsed?'Match en pause — mi-temps '+half:'Prêt — 1re mi-temps');$('onCount').textContent=players.filter(p=>p.on).length+' / '+GAME_SIZE;$('benchCount').textContent=players.filter(p=>p.selected&&!p.on).length+' / '+(GAME_SIZE===11?18:14);$('starterHelp').textContent=running?'Pendant le match : SORTIE → ENTRÉE • chrono continu.':'Format '+GAME_SIZE+' — convoquez jusqu’à '+(GAME_SIZE===11?18:14)+' joueuses puis sélectionnez '+GAME_SIZE+' titulaires. Avant démarrage : corrections possibles.';$('matchDuration').textContent=totalMinutes()+'′ + arrêts';$('liveDuration').textContent='Match '+totalMinutes()+'′ + arrêts';$('rosterInfo').textContent='Contingent : '+teams[teamKey].length+' joueuses • Convoquées : '+players.filter(p=>p.selected).length+' / '+(GAME_SIZE===11?18:14)+' • Gardienne : '+(players.find(p=>p.gk)?.name||'à définir');renderList($('onfield'),players.filter(p=>p.on),true);renderList($('bench'),players.filter(p=>p.selected&&!p.on),false);renderLeaderboard();renderEvents()}
 function resetMatchState(){running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;players=[]}
 function loadMatchRoster(){
   const roster=getTeamRoster();
