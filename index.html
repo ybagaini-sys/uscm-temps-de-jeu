@@ -348,7 +348,12 @@ function render(){
  $('clock').textContent=fmt(elapsed);$('score').textContent=isHome?scoreUSCM+' — '+scoreOpp:scoreOpp+' — '+scoreUSCM;$('scoreLabel').textContent=isHome?'USCM — adversaire':'Adversaire — USCM';$('formatPanel').classList.toggle('compactHidden',matchStarted||finished);$('top').classList.toggle('compact',running||finished);$('homeBtn').classList.toggle('primary',isHome);$('awayBtn').classList.toggle('primary',!isHome);$('teamOne').classList.toggle('primary',teamKey==='one');$('team28').classList.toggle('primary',teamKey==='plus28');$('status').textContent=finished?'Match terminé — récapitulatif disponible':running?'Match en cours — mi-temps '+half:(elapsed?'Match en pause — mi-temps '+half:'Prêt — 1re mi-temps');$('onCount').textContent=players.filter(p=>p.on).length+' / '+GAME_SIZE;$('benchCount').textContent=players.filter(p=>p.selected&&!p.on).length+' / '+(GAME_SIZE===11?18:14);$('starterHelp').textContent=running?'Pendant le match : SORTIE → ENTRÉE • chrono continu.':'Format '+GAME_SIZE+' — convoquez jusqu’à '+(GAME_SIZE===11?18:14)+' joueuses puis sélectionnez '+GAME_SIZE+' titulaires.';$('matchDuration').textContent=totalMinutes()+'′ + arrêts';$('liveDuration').textContent='Match '+totalMinutes()+'′ + arrêts';$('rosterInfo').textContent='Contingent : '+teams[teamKey].length+' joueuses • Convoquées : '+players.filter(p=>p.selected).length+' / '+(GAME_SIZE===11?18:14)+' • Gardienne : '+(players.find(p=>p.gk)?.name||'à définir');renderList($('onfield'),players.filter(p=>p.on),true);renderList($('bench'),players.filter(p=>!p.on),false);renderLeaderboard();renderEvents()}
 function resetMatchState(){running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;players=[]}
 function loadMatchRoster(){matchRoster=teams[teamKey].map(x=>({num:x[0],name:x[1]}));const max=GAME_SIZE===11?18:14;const auto=matchRoster.length<=max;players=matchRoster.map(x=>({num:x.num,name:x.name,gk:false,on:false,selected:auto,ejected:false,yellows:0,segs:[]}));}
-function selectTeam(k){if(matchStarted||running){msg('L’équipe ne peut plus être modifiée après le début du match.');return}teamKey=k;resetMatchState();loadMatchRoster();if(teamKey==="one")GAME_SIZE=11;render()}
+function selectTeam(k){if(matchStarted||running){msg('L’équipe ne peut plus être modifiée après le début du match.');return}teamKey=k;resetMatchState();
+if(teamKey==="one") GAME_SIZE=11;
+else if(GAME_SIZE===11) GAME_SIZE=7;
+applyTeamRules();
+loadMatchRoster();
+render()}
 function setMode(size){if(teamKey==="one" && size!==11){msg("La Une féminine joue obligatoirement à 11.");return}if(matchStarted||running){msg('Le format ne peut plus être modifié après le début du match.');return}GAME_SIZE=size;const max=size===11?18:14;const auto=players.length<=max;players.forEach(p=>{p.on=false;p.selected=auto;p.ejected=false;p.yellows=0;p.segs=[]});selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;['mode7','mode9','mode11'].forEach(id=>$(id).classList.remove('primary'));$('mode'+size).classList.add('primary');render()}
 function selectStarter(num){if(matchStarted)return;const p=players.find(x=>x.num===num);if(!p||p.on||!p.selected)return;if(players.filter(x=>x.on).length>=GAME_SIZE){msg('Les '+GAME_SIZE+' titulaires sont déjà sélectionnées.');return}p.on=true;render()}
 function changeGoalkeeper(num){const np=players.find(x=>x.num===num);if(!np||np.ejected)return;if(!matchStarted){if(!np.selected){msg('Convoque d’abord cette joueuse.');return}players.forEach(p=>p.gk=false);np.gk=true;gkNum=num;render();return}if(!running){msg('Le chrono doit être en marche pour changer de gardienne.');return}tick();const old=players.find(p=>p.gk&&!p.ejected);if(old&&old.num===num)return;if(!old){np.gk=true;gkNum=num;render();return}
@@ -378,7 +383,10 @@ $('start').onclick=startMatch;$('pause').onclick=pauseMatch;$('half').onclick=ha
 function finishMatch(){if(finished)return;if(running){tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})}finished=true;selectedOut=null;$('finalPanel').style.display='block';$('finish').disabled=true;render()}
 // Enhance roster modal with a match-only add option.
 $('manageRoster').insertAdjacentHTML('afterend','<button id="addMatchOnly" class="venueBtn">➕ Pour ce match</button>');$('addMatchOnly').onclick=addMatchPlayer;
-if(teamKey==="one") GAME_SIZE=11; loadMatchRoster(); render();
+if(teamKey==="one") GAME_SIZE=11;
+applyTeamRules();
+loadMatchRoster();
+render();
 })();
 
 </script>
