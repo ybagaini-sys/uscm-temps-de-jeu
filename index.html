@@ -105,7 +105,7 @@ button:disabled{opacity:.42}
 .balanceAdvice{display:none!important}
 #leaderboard{padding:4px}
 .lbGrid{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-flow:column;grid-template-rows:repeat(7,minmax(0,1fr));gap:2px}
-.lbItem{padding:3px 7px}
+.lbItem{padding:2px 7px;min-height:25px}
 .lbName{font-size:11px}.lbTime{font-size:14px}
 .eventLayout{grid-template-columns:1fr 1fr;gap:5px;margin-top:4px}
 .events{padding:4px}
@@ -330,12 +330,14 @@ else{b.className=onfield?"":"primary";b.textContent=onfield?"SORTIE":"ENTRÉE";b
 d.appendChild(b);el.appendChild(d);
 })}
 function renderLeaderboard(){
-const lb=$("leaderboard"),startersSelected=players.some(p=>p.on);
-if(!(running||elapsed>0||finished||startersSelected)){lb.style.display="none";lb.innerHTML="";return}
-const sorted=[...players].sort((a,b)=>{const d=played(b)-played(a);return d!==0?d:a.name.localeCompare(b.name,"fr")});
+const lb=$("leaderboard");
+const sorted=[...players].sort((a,b)=>{
+  const d=played(b)-played(a);
+  return d!==0?d:a.name.localeCompare(b.name,"fr");
+});
 lb.style.display="block";
 lb.innerHTML='<div class="lbTitle"><span class="label">TEMPS DE JEU EFFECTIF — DU PLUS AU MOINS</span><span class="count">14 joueuses • en direct</span></div><div class="lbGrid">'+
-sorted.map(p=>'<div class="lbItem '+(p.on?"on ":"")+(p.gk?"gk":"")+'"><div class="lbName">'+esc(p.name)+(p.gk?" 🧤":"")+'</div><div class="lbTime">'+secFmt(played(p))+'</div></div>').join("")+'</div>';
+sorted.map(p=>'<div class="lbItem '+(p.on?"on ":"")+(p.gk?"gk":"")+(p.ejected?" ejected":"")+'"><div class="lbName">'+esc(p.name)+(p.gk?" 🧤":"")+'</div><div class="lbTime">'+secFmt(played(p))+'</div></div>').join("")+'</div>';
 }
 function renderAdvice(){
 const deficits=players.filter(p=>!p.gk&&mm(p)<30).map(p=>({p,need:Math.max(0,30-mm(p))})).sort((a,b)=>b.need-a.need);
