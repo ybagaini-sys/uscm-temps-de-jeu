@@ -464,9 +464,9 @@ function renderList(el,list,onfield){
       b.textContent='✕ RETIRER TITULAIRE';
       b.onclick=()=>removeStarter(p.num);
     }else{
-      b.className='primary';b.textContent='✓ TITULAIRE';
-      b.disabled=players.filter(x=>x.on).length>=GAME_SIZE;
-      b.onclick=()=>selectStarter(p.num);
+      b.className='primary';b.textContent='✓ CONVOQUÉE — RETIRER';
+      b.disabled=false;
+      b.onclick=()=>toggleMatchSelection(p.num);
     }
   }else{
     b.textContent=onfield?'SORTIE':'ENTRÉE';
