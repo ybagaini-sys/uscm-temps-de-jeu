@@ -274,6 +274,7 @@ const DEFAULT_TEAMS={
 };
 // If the provided capture contains a duplicate first name, keep names as the source of truth and use the shown jersey numbers.
 const STORAGE='uscm_temps_de_jeu_v13_teams';
+const BASE_STORAGE='uscm_temps_de_jeu_base_locked_v1';
 function validRoster(arr){
   return Array.isArray(arr) && arr.every(x=>Array.isArray(x)&&x.length>=2&&String(x[0]).trim()&&String(x[1]).trim());
 }
@@ -285,36 +286,27 @@ function looksLike28(arr){
   const names=new Set((arr||[]).map(x=>String(x[1])));
   return names.has("Katia") && names.has("Adelina") && names.has("Maryline") && names.has("Gordana");
 }
+function cloneTeams(x){return JSON.parse(JSON.stringify(x))}
+function validRoster(arr){return Array.isArray(arr)&&arr.every(x=>Array.isArray(x)&&x.length>=2&&String(x[0]).trim()&&String(x[1]).trim())}
+function validTeams(x){return !!(x&&validRoster(x.one)&&validRoster(x.plus28))}
+function getBaseTeams(){
+  try{
+    const b=JSON.parse(localStorage.getItem(BASE_STORAGE));
+    if(validTeams(b))return b;
+  }catch(e){}
+  const b=cloneTeams(DEFAULT_TEAMS);
+  try{localStorage.setItem(BASE_STORAGE,JSON.stringify(b))}catch(e){}
+  return b;
+}
 function loadTeams(){
-  const fallback=JSON.parse(JSON.stringify(DEFAULT_TEAMS));
+  const base=getBaseTeams();
   try{
-    const x=JSON.parse(localStorage.getItem(STORAGE));
-    if(x && validRoster(x.one) && validRoster(x.plus28)){
-      // Never accept a stored roster where the two teams have been swapped.
-      if(looksLike28(x.one) && looksLikeUne(x.plus28)){
-        localStorage.setItem(STORAGE,JSON.stringify(fallback));
-        return fallback;
-      }
-      return x;
-    }
+    const saved=JSON.parse(localStorage.getItem(STORAGE));
+    if(validTeams(saved))return saved;
   }catch(e){}
-  // One-time migration from v12.6, but only when the previous data is structurally
-  // valid and clearly identifiable as the old swapped-roster state.
-  try{
-    const old=JSON.parse(localStorage.getItem('uscm_temps_de_jeu_v12_6_teams'));
-    if(old && validRoster(old.one) && validRoster(old.plus28)){
-      if(looksLike28(old.one) && looksLikeUne(old.plus28)){
-        localStorage.setItem(STORAGE,JSON.stringify(fallback));
-        return fallback;
-      }
-      // Preserve correctly separated previous data.
-      if(looksLikeUne(old.one) && looksLike28(old.plus28)){
-        localStorage.setItem(STORAGE,JSON.stringify(old));
-        return old;
-      }
-    }
-  }catch(e){}
-  return fallback;
+  const fresh=cloneTeams(base);
+  try{localStorage.setItem(STORAGE,JSON.stringify(fresh))}catch(e){}
+  return fresh;
 }
 let teams=loadTeams(),teamKey='one';
 function saveTeams(){localStorage.setItem(STORAGE,JSON.stringify(teams))}
@@ -462,8 +454,19 @@ function halfMatch(){if(finished)return;if(running){tick();running=false;clearIn
 function recordPlayerEvent(num){tick();const p=players.find(x=>x.num===num);if(!p||!running)return;if(pendingEvent==='yellow'){p.yellows++;if(p.yellows===1)addEvent('yellow',p,'1er carton jaune');else if(p.yellows===2){p.ejected=true;const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;addEvent('red',p,'carton rouge — 2e carton jaune');msg(p.name+' reçoit un 2e jaune : rouge automatique, exclusion définitive.')}}else if(pendingEvent==='red'){p.ejected=true;const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;addEvent('red',p,'carton rouge');msg(p.name+' est exclue définitivement. Aucun remplacement.')}else addEvent(pendingEvent,p);pendingEvent=null;$('playerModal').classList.remove('open');render()}
 function openPlayerModal(type){if(!running){msg('Le chrono doit être en marche.');return}pendingEvent=type;$('modalTitle').textContent=type==='goal'?'⚽ But USCM — qui a marqué ?':type==='penalty'?'⚽ Pénalty USCM — qui a marqué ?':type==='yellow'?'🟨 Carton jaune — joueuse ?':'🟥 Carton rouge — joueuse ?';$('modalGrid').innerHTML=players.filter(p=>p.on&&!p.ejected).map(p=>'<button type="button" data-pnum="'+p.num+'">'+esc(p.name)+'</button>').join('');$('modalGrid').querySelectorAll('button').forEach(b=>b.onclick=()=>recordPlayerEvent(b.dataset.pnum));$('playerModal').classList.add('open')}
 function recordOppGoal(){if(!running){msg('Le chrono doit être en marche.');return}tick();addEvent('opp');render()}
+function resetCurrentTeamToBase(){
+  const base=getBaseTeams();
+  teams[teamKey]=cloneTeams(base[teamKey]);
+  saveTeams();
+  resetMatchState();
+  GAME_SIZE=(teamKey==='one')?11:7;
+  loadMatchRoster();
+  syncTeamFormatUI();
+  render();
+  msg('Contingent de base restauré pour '+(teamKey==='one'?'La Une féminine':'Femmes 28+')+'.');
+}
 function openRoster(){if(matchStarted||running){msg('Le contingent ne peut être modifié après le début du match.');return}renderRosterModal();$('rosterModal').classList.add('open')}
-function renderRosterModal(){const t=teams[teamKey];$('rosterModalInfo').textContent=(teamKey==='one'?'La Une féminine':'Femmes 28+')+' • '+t.length+' joueuses. Les modifications définitives sont enregistrées pour les prochains matchs.';$('rosterRows').innerHTML=t.map((p,i)=>'<div class="player" style="margin-top:3px"><div class="row"><div class="num">'+esc(p[0]||'—')+'</div><div class="name">'+esc(p[1])+'</div><button type="button" data-edit="'+i+'" style="min-height:26px;font-size:9px">✏️ N° / nom</button><button type="button" data-del="'+i+'" style="min-height:26px;font-size:9px">🗑️</button></div></div>').join('');$('rosterRows').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editRoster(+b.dataset.edit));$('rosterRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteRoster(+b.dataset.del))}
+function renderRosterModal(){const t=teams[teamKey];$('rosterModalInfo').textContent=(teamKey==='one'?'La Une féminine':'Femmes 28+')+' • '+t.length+' joueuses. Les modifications définitives sont conservées après actualisation. Le contingent de base peut être restauré.';$('rosterRows').innerHTML=t.map((p,i)=>'<div class="player" style="margin-top:3px"><div class="row"><div class="num">'+esc(p[0]||'—')+'</div><div class="name">'+esc(p[1])+'</div><button type="button" data-edit="'+i+'" style="min-height:26px;font-size:9px">✏️ N° / nom</button><button type="button" data-del="'+i+'" style="min-height:26px;font-size:9px">🗑️</button></div></div>').join('');$('rosterRows').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editRoster(+b.dataset.edit));$('rosterRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteRoster(+b.dataset.del))}$('rosterRows').parentElement.querySelector('#rosterResetArea')?.remove();$('rosterRows').insertAdjacentHTML('afterend','<div id="rosterResetArea" style="display:flex;gap:4px;margin-top:5px"><button type="button" id="resetCurrentRoster" style="min-height:27px;font-size:9px">↺ Restaurer le contingent de base</button></div>');$('resetCurrentRoster').onclick=()=>{if(confirm('Restaurer le contingent de base de cette équipe ? Les modifications permanentes de cette équipe seront perdues.'))resetCurrentTeamToBase();renderRosterModal()}
 function editRoster(i){const p=teams[teamKey][i];const name=prompt('Prénom de la joueuse',p[1]);if(name===null)return;if(!name.trim()){msg('Le prénom est obligatoire.');return}const num=prompt('Nouveau numéro de maillot',p[0]||'');if(num===null||!num.trim())return;const scope=prompt('Modification du numéro :\nD = définitive (contingent)\nP = provisoire (ce match uniquement)','D');if(scope===null)return;const mode=scope.trim().toUpperCase();if(mode!=='D'&&mode!=='P'){msg('Choisis D pour définitive ou P pour provisoire.');return}if(mode==='D'){if(teams[teamKey].some((x,j)=>j!==i&&x[0]===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}teams[teamKey][i]=[num.trim(),name.trim()];saveTeams()}else{const oldNum=p[0],cur=players.find(x=>x.num===oldNum&&x.name===p[1]);if(cur){if(players.some(x=>x!==cur&&x.num===num.trim())){msg('Ce numéro existe déjà pour ce match.');return}cur.num=num.trim();cur.name=name.trim()}else{msg('La modification provisoire s’appliquera au prochain chargement du match.');}}renderRosterModal();render()}
 function deleteRoster(i){const p=teams[teamKey][i];if(!confirm('Supprimer définitivement '+p[1]+' du contingent ?'))return;teams[teamKey].splice(i,1);saveTeams();renderRosterModal();render()}
 function addRoster(){const name=prompt('Prénom de la nouvelle joueuse');if(name===null)return;const num=prompt('Numéro de maillot permanent');if(num===null)return;if(!name.trim()||!num.trim()){msg('Le prénom et le numéro sont obligatoires.');return}if(teams[teamKey].some(p=>p[0]===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}teams[teamKey].push([num.trim(),name.trim()]);saveTeams();renderRosterModal();render()}
