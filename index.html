@@ -147,7 +147,7 @@ button:disabled{opacity:.42}
  .players{gap:2px}.player{padding:2px}.player button{min-height:20px;font-size:7px}
 }
 
-.playerBadges{display:inline-flex;align-items:center;gap:2px;margin-left:3px;vertical-align:middle}
+.player.unselected{opacity:.62}.playerBadges{display:inline-flex;align-items:center;gap:2px;margin-left:3px;vertical-align:middle}
 .playerBadge{font-size:11px;line-height:1}
 </style>
 </head>
@@ -177,7 +177,10 @@ button:disabled{opacity:.42}
 <div id="message"></div>
 </section>
 <section id="formatPanel" class="panel">
-<div class="label">Format du match</div>
+<div class="label">Équipe</div>
+<div class="controls" style="margin-top:3px"><button id="teamOne" class="primary venueBtn">🔵 La Une féminine</button><button id="team28" class="venueBtn">🟣 Femmes 28+</button><button id="manageRoster" class="venueBtn">⚙️ Contingent</button></div>
+<div id="rosterInfo" class="notice" style="margin-top:3px"></div>
+<div class="label" style="margin-top:5px">Format du match</div>
 <div class="controls" style="margin-top:4px"><button id="mode7" class="primary">⚽ 7</button><button id="mode9">⚽ 9</button><button id="mode11">⚽ 11</button></div>
 <div class="label" style="margin-top:5px">Lieu</div>
 <div class="controls" style="margin-top:3px"><button id="homeBtn" class="primary venueBtn">🏠 Domicile</button><button id="awayBtn" class="venueBtn">✈️ Extérieur</button></div>
@@ -245,6 +248,13 @@ button:disabled{opacity:.42}
 <section id="finalPanel" class="panel"><div class="sectionTitle"><h2>🏁 Récapitulatif final</h2><div id="finalSummary" class="count"></div></div><div id="final"></div></section>
 </div>
 
+<div id="rosterModal" class="modal" role="dialog" aria-modal="true">
+<div class="modalCard">
+<div class="modalTitle">⚙️ Gestion du contingent</div>
+<div id="rosterModalInfo" class="notice"></div>
+<div id="rosterRows"></div>
+<div class="controls" style="margin-top:6px"><button id="addPlayer" class="primary">➕ Ajouter une joueuse</button><button id="rosterClose">Fermer</button></div>
+</div></div>
 <div id="playerModal" class="modal" role="dialog" aria-modal="true">
 <div class="modalCard">
 <div id="modalTitle" class="modalTitle">Choisir une joueuse</div>
@@ -254,214 +264,104 @@ button:disabled{opacity:.42}
 </div>
 <script>
 (()=>{
-const roster=[
-["1","Delphine",true],["2","Katia",false],["3","Adelina",false],["4","Maryline",false],
-["6","Marisol",false],["7","Ana Claudia",false],["8","Stéphanie",false],["10","Valentina",false],
-["11","Elodie",false],["12","Besa",false],["13","Claudia",false],["14","Vanessa",false],
-["17","Milene",false],["19","Gordana",false]
-];
-const DURATIONS={7:60,9:60,11:90};
-let players=roster.map(x=>({num:x[0],name:x[1],gk:x[2],on:false,ejected:false,yellows:0,segs:[]}));
-let elapsed=0,running=false,last=0,timer=null,half=1,selectedOut=null,history=[],events=[],subEvents=[],GAME_SIZE=7,finished=false,pendingEvent=null,scoreUSCM=0,scoreOpp=0,isHome=true,matchStarted=false;
+const DEFAULT_TEAMS={
+  one:[
+    ["1","Delphine"],["2","Anaëlle"],["3","Ilaria"],["4","Sara"],["5","Yasmine"],["6","Malika"],["7","Liza"],["8","Melia"],["9","Olivia"],["10","Chloé"],["12","Naomie"],["13","Marie"],["15","Raquel"],["16","Enola"],["18","Delphine"],["19","Manon"],["20","Cassandra"],["21","Charlotte"],["22","Eva"],["23","Leonita"],["24","Mariana"],["25","Noelia"]
+  ],
+  plus28:[
+    ["1","Delphine"],["2","Katia"],["3","Adelina"],["4","Maryline"],["6","Marisol"],["7","Ana Claudia"],["8","Stéphanie"],["10","Valentina"],["11","Elodie"],["12","Besa"],["13","Claudia"],["14","Vanessa"],["17","Milene"],["19","Gordana"]
+  ]
+};
+// If the provided capture contains a duplicate first name, keep names as the source of truth and use the shown jersey numbers.
+const STORAGE='uscm_temps_de_jeu_v12_teams';
+function loadTeams(){
+ try{const x=JSON.parse(localStorage.getItem(STORAGE)); if(x&&x.one&&x.plus28)return x}catch(e){}
+ return JSON.parse(JSON.stringify(DEFAULT_TEAMS));
+}
+let teams=loadTeams(),teamKey='one';
+function saveTeams(){localStorage.setItem(STORAGE,JSON.stringify(teams))}
 const $=id=>document.getElementById(id);
+const DURATIONS={7:60,9:60,11:90};
+let GAME_SIZE=7,matchStarted=false,running=false,last=0,elapsed=0,half=1,timer=null,finished=false,selectedOut=null,history=[],events=[],subEvents=[],pendingEvent=null,scoreUSCM=0,scoreOpp=0,isHome=true;
+let matchRoster=[],players=[],gkNum=null;
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function fmt(s){s=Math.max(0,Math.floor(s));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
+function secFmt(s){return fmt(s)}
 function totalMinutes(){return DURATIONS[GAME_SIZE]||60}
-function played(p){
-let total=p.segs.reduce((a,s)=>a+Math.max(0,s.end-s.start),0);
-const active=p.segs.length&&p.segs[p.segs.length-1].end===null?p.segs[p.segs.length-1]:null;
-if(active) total+=Math.max(0,elapsed-active.start);
-return total;
-}
-function mm(p){return Math.floor(played(p)/60)}
-function fmt(s){s=Math.max(0,Math.floor(s));return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0")}
-function secFmt(sec){return fmt(sec)}
-function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+function msg(t){$("message").textContent=t;setTimeout(()=>$("message").textContent="",2200)}
 function activeSeg(p){return p.segs.length&&p.segs[p.segs.length-1].end===null?p.segs[p.segs.length-1]:null}
+function played(p){let n=p.segs.reduce((a,x)=>a+Math.max(0,x.end-x.start),0);const a=activeSeg(p);if(a)n+=Math.max(0,elapsed-a.start);return n}
+function mm(p){return Math.floor(played(p)/60)}
 function tick(){if(!running)return;const now=performance.now();elapsed+=Math.max(0,(now-last)/1000);last=now}
-function msg(t){$("message").textContent=t;setTimeout(()=>{$("message").textContent=""},1800)}
-
-function matchTimeAt(sec){return fmt(sec)}
-function eventIcon(type){return type==="goal"?"⚽":type==="penalty"?"⚽ P":type==="opp"?"🔴⚽":type==="yellow"?"🟨":"🟥"}
-function addEvent(type,p=null,detail=null){
-  events.push({type,name:p?p.name:null,time:elapsed,detail:detail||null});
-  if(type==="goal"||type==="penalty")scoreUSCM++;
-  if(type==="opp")scoreOpp++;
-  renderEvents()
-}
+function eventIcon(t){return t==='goal'?'⚽':t==='penalty'?'⚽ P':t==='opp'?'🔴⚽':t==='yellow'?'🟨':'🟥'}
+function addEvent(type,p=null,detail=null){events.push({type,name:p?p.name:null,num:p?p.num:null,time:elapsed,detail:detail||null});if(type==='goal'||type==='penalty')scoreUSCM++;if(type==='opp')scoreOpp++;renderEvents()}
 function addSub(out,inn){subEvents.push({out,inn,time:elapsed});renderEvents()}
-function eventLabel(e){
-  if(e.type==="goal") return "USCM • "+e.name;
-  if(e.type==="penalty") return "USCM P • "+e.name;
-  if(e.type==="opp") return "But adverse";
-  if(e.type==="yellow") return e.name+" • "+(e.detail||"1er carton jaune");
-  if(e.type==="red") return e.name+" • "+(e.detail||"carton rouge");
-  return e.name+" • carton rouge";
-}
-
-function renderRecap(){
- const arr=[];
- subEvents.forEach(e=>arr.push({time:e.time,type:"Changement",detail:'<span class="in">'+esc(e.inn)+'</span> ↔ <span class="out">'+esc(e.out)+'</span>'}));
- events.forEach(e=>arr.push({time:e.time,type:e.type==="goal"?"⚽ But USCM":e.type==="penalty"?"⚽ Pénalty":e.type==="opp"?"🔴 But adverse":e.type==="yellow"?"🟨 Carton jaune":"🟥 Carton rouge",detail:esc(eventLabel(e))}));
- arr.sort((a,b)=>a.time-b.time);
- $("recapScore").textContent=isHome?"USCM "+scoreUSCM+" — "+scoreOpp+" Adversaire":"Adversaire "+scoreOpp+" — "+scoreUSCM+" USCM";
- $("recapGrid").innerHTML='<div class="recapRow recapHead"><div class="recapCell">Temps</div><div class="recapCell">Type</div><div class="recapCell">Détail</div><div class="recapCell">Score</div></div>'+ (arr.length?arr.map(e=>'<div class="recapRow"><div class="recapCell">'+fmt(e.time)+'</div><div class="recapCell recapType">'+e.type+'</div><div class="recapCell">'+e.detail+'</div><div class="recapCell">'+scoreAt(e.time)+'</div></div>').join(""):'<div class="recapEmpty" style="grid-column:1/-1">Aucun événement enregistré.</div>');
- $("recapTimes").innerHTML=[...players].sort((a,b)=>played(b)-played(a)).map(p=>'<div class="finalRow '+(played(p)>=(p.gk?3600:1800)?'ok':'low')+'"><div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+'</div><div class="big">'+secFmt(played(p))+'</div></div></div>').join("");
-}
-function scoreAt(t){let a=0,b=0;events.filter(e=>e.time<=t).sort((x,y)=>x.time-y.time).forEach(e=>{if(e.type==="goal"||e.type==="penalty")a++;if(e.type==="opp")b++});return isHome?(a+" — "+b):(b+" — "+a)}
-function showRecap(){renderRecap();$("dashboard").classList.add("hidden");$("recapPanel").classList.add("open")}
-function hideRecap(){$("dashboard").classList.remove("hidden");$("recapPanel").classList.remove("open")}
+function eventLabel(e){if(e.type==='goal')return 'USCM • '+e.name;if(e.type==='penalty')return 'USCM P • '+e.name;if(e.type==='opp')return 'But adverse';if(e.type==='yellow')return e.name+' • '+(e.detail||'1er carton jaune');return e.name+' • '+(e.detail||'carton rouge')}
+function scoreAt(t){let a=0,b=0;events.filter(e=>e.time<=t).sort((x,y)=>x.time-y.time).forEach(e=>{if(e.type==='goal'||e.type==='penalty')a++;if(e.type==='opp')b++});return isHome?a+' — '+b:b+' — '+a}
+function playerBadges(p){let s='';const goals=events.filter(e=>e.type==='goal'&&e.num===p.num).length,pens=events.filter(e=>e.type==='penalty'&&e.num===p.num).length,y=events.filter(e=>e.type==='yellow'&&e.num===p.num).length,r=events.filter(e=>e.type==='red'&&e.num===p.num).length;if(goals)s+='⚽'+(goals>1?goals:'');if(pens)s+=' ⚽P'+(pens>1?pens:'');if(y)s+=' 🟨'+(y>1?y:'');if(r)s+=' 🟥';return s?'<span class="playerBadges">'+s+'</span>':''}
+function renderLeaderboard(){const sorted=[...players].sort((a,b)=>{const d=played(b)-played(a);return d||a.name.localeCompare(b.name,'fr')});$("leaderboard").innerHTML='<div class="lbTitle"><span class="label">TEMPS DE JEU EFFECTIF — DU PLUS AU MOINS</span><span class="count">'+players.length+' joueuses • en direct</span></div><div class="lbGrid" style="grid-template-rows:repeat('+Math.ceil(sorted.length/2)+',minmax(0,1fr))">'+sorted.map(p=>'<div class="lbItem '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected':'')+'"><div class="lbName">'+esc(p.name)+(p.gk?' 🧤':'')+playerBadges(p)+'</div><div class="lbTime">'+secFmt(played(p))+'</div></div>').join('')+'</div>'}
 function renderEvents(){
-  $("subCount").textContent=subEvents.length+" changement"+(subEvents.length>1?"s":"");
-  $("eventCount").textContent=events.length+" événement"+(events.length>1?"s":"");
-  $("subEvents").innerHTML=subEvents.length
-    ?subEvents.map(e=>'<div class="eventItem"><span>🔄</span><span class="evtText"><span class="changeOut">'+esc(e.out)+'</span> → <span class="changeIn">'+esc(e.inn)+'</span></span><span class="evtTime">'+matchTimeAt(e.time)+'</span></div>').join("")
-    :'<div class="eventEmpty">Aucun changement enregistré.</div>';
-  renderRecap();
-  $("matchEvents").innerHTML=events.length
-    ?[...events].reverse().map(e=>'<div class="eventItem"><span>'+eventIcon(e.type)+'</span><span class="evtText">'+esc(eventLabel(e))+'</span><span class="evtTime">'+matchTimeAt(e.time)+'</span></div>').join("")
-    :'<div class="eventEmpty">Aucun événement enregistré.</div>';
+ $('subCount').textContent=subEvents.length+' changement'+(subEvents.length>1?'s':'');$('eventCount').textContent=events.length+' événement'+(events.length>1?'s':'');
+ $('subEvents').innerHTML=subEvents.length?subEvents.map(e=>'<div class="eventItem"><span>🔄</span><span class="evtText"><span class="changeOut">'+esc(e.out)+'</span> → <span class="changeIn">'+esc(e.inn)+'</span></span><span class="evtTime">'+fmt(e.time)+'</span></div>').join(''):'<div class="eventEmpty">Aucun changement enregistré.</div>';
+ $('matchEvents').innerHTML=events.length?[...events].reverse().map(e=>'<div class="eventItem"><span>'+eventIcon(e.type)+'</span><span class="evtText">'+esc(eventLabel(e))+'</span><span class="evtTime">'+fmt(e.time)+'</span></div>').join(''):'<div class="eventEmpty">Aucun événement enregistré.</div>';
+ renderRecap();
 }
-function openPlayerModal(type){
-  if(!running){msg("Le chrono doit être en marche.");return}
-  pendingEvent=type;
-  $("modalTitle").textContent=
-    type==="goal"?"⚽ But USCM — qui a marqué ?":
-    type==="penalty"?"⚽ Pénalty USCM — qui a marqué ?":
-    type==="yellow"?"🟨 Carton jaune — joueuse ?":"🟥 Carton rouge — joueuse ?";
-  const list=players.filter(p=>p.on&&!p.ejected);
-  $("modalGrid").innerHTML=list.map(p=>'<button data-pnum="'+p.num+'">'+esc(p.name)+'</button>').join("");
-  $("modalGrid").querySelectorAll("button").forEach(b=>b.onclick=()=>recordPlayerEvent(b.dataset.pnum));
-  $("playerModal").classList.add("open");
-}
-function recordPlayerEvent(num){
-  tick();
-  const p=players.find(x=>x.num===num);
-  if(!p||!running)return;
-  if(pendingEvent==="yellow"){
-    p.yellows++;
-    if(p.yellows===1){
-      addEvent("yellow",p,"1er carton jaune");
-    }else if(p.yellows===2){
-      addEvent("yellow",p,"2e carton jaune");
-      p.ejected=true;
-      const s=activeSeg(p); if(s)s.end=elapsed;
-      p.on=false;
-      addEvent("red",p,"carton rouge — 2e carton jaune");
-      msg(p.name+" reçoit un 2e jaune : rouge automatique, exclusion définitive.");
-    }
-  }else if(pendingEvent==="red"){
-    p.ejected=true;
-    const s=activeSeg(p); if(s)s.end=elapsed;
-    p.on=false;
-    addEvent("red",p,"carton rouge");
-    msg(p.name+" est exclue définitivement. Aucun remplacement.");
-  }else{
-    addEvent(pendingEvent,p);
-  }
-  pendingEvent=null;
-  $("playerModal").classList.remove("open");
-  render();
-}
-function recordOppGoal(){
-  if(!running){msg("Le chrono doit être en marche.");return}
-  tick(); addEvent("opp"); render();
-}
+function renderRecap(){const arr=[];subEvents.forEach(e=>arr.push({time:e.time,type:'Changement',detail:'<span class="out">'+esc(e.out)+'</span> → <span class="in">'+esc(e.inn)+'</span>'}));events.forEach(e=>arr.push({time:e.time,type:e.type==='goal'?'⚽ But USCM':e.type==='penalty'?'⚽ Pénalty':e.type==='opp'?'🔴 But adverse':e.type==='yellow'?'🟨 Carton jaune':'🟥 Carton rouge',detail:esc(eventLabel(e))}));arr.sort((a,b)=>a.time-b.time);$('recapScore').textContent=isHome?'USCM '+scoreUSCM+' — '+scoreOpp+' Adversaire':'Adversaire '+scoreOpp+' — '+scoreUSCM+' USCM';$('recapGrid').innerHTML='<div class="recapRow recapHead"><div class="recapCell">Temps</div><div class="recapCell">Type</div><div class="recapCell">Détail</div><div class="recapCell">Score</div></div>'+(arr.length?arr.map(e=>'<div class="recapRow"><div class="recapCell">'+fmt(e.time)+'</div><div class="recapCell recapType">'+e.type+'</div><div class="recapCell">'+e.detail+'</div><div class="recapCell">'+scoreAt(e.time)+'</div></div>').join(''):'<div class="recapEmpty" style="grid-column:1/-1">Aucun événement enregistré.</div>');$('recapTimes').innerHTML=[...players].sort((a,b)=>played(b)-played(a)).map(p=>'<div class="finalRow"><div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+(p.gk?' 🧤':'')+playerBadges(p)+'</div><div class="big">'+secFmt(played(p))+'</div></div></div>').join('')}
+function showRecap(){$('dashboard').classList.add('hidden');$('recapPanel').classList.add('open');renderRecap()}function hideRecap(){$('dashboard').classList.remove('hidden');$('recapPanel').classList.remove('open')}
 function renderList(el,list,onfield){
-el.innerHTML="";
-if(!list.length){el.innerHTML='<div class="notice">Aucune joueuse dans cette zone.</div>';return}
-list.forEach(p=>{
-const m=mm(p),target=p.gk?60:30,rem=Math.max(0,target-m);
-const d=document.createElement("div");d.className="player "+(p.on?"on ":"")+(p.gk?"gk ":"")+(p.ejected?"ejected":"");
-d.innerHTML='<div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+'</div><div class="time">'+m+'′</div></div><div class="subrow"><div><span class="badge">'+(p.gk?"🧤 GARDIENNE":p.on?"SUR LE TERRAIN":"BANC")+'</span> <span class="remaining">'+(p.gk?"objectif 60′":"minimum 30′ • reste "+rem+"′")+'</span></div></div><div class="progress"><div class="fill" style="width:'+Math.min(100,m/60*100)+'%"></div></div>';
-const b=document.createElement("button");
-if(p.ejected){b.textContent="🟥 EXCLUE";b.disabled=true;d.appendChild(b);el.appendChild(d);return}
-if(!running&&!onfield){b.className="primary";b.textContent=p.on?"✓ TITULAIRE":"TITULAIRE";b.disabled=p.on||players.filter(x=>x.on).length>=GAME_SIZE;b.addEventListener("click",()=>selectStarter(p.num))}
-else{b.className=onfield?"":"primary";b.textContent=onfield?"SORTIE":"ENTRÉE";b.disabled=(!running)||(!onfield&&selectedOut===null);b.addEventListener("click",()=>onfield?chooseOut(p.num):chooseIn(p.num))}
-d.appendChild(b);el.appendChild(d);
-})}
-function playerEventBadges(p){
-const goals=events.filter(e=>e.type==="goal"&&e.name===p.name).length;
-const pens=events.filter(e=>e.type==="penalty"&&e.name===p.name).length;
-const yellows=events.filter(e=>e.type==="yellow"&&e.name===p.name).length;
-const reds=events.filter(e=>e.type==="red"&&e.name===p.name).length;
-let s="";
-if(goals)s+='<span class="playerBadge">⚽'+(goals>1?goals:"")+'</span>';
-if(pens)s+='<span class="playerBadge">⚽P'+(pens>1?pens:"")+'</span>';
-if(yellows)s+='<span class="playerBadge">🟨'+(yellows>1?yellows:"")+'</span>';
-if(reds)s+='<span class="playerBadge">🟥</span>';
-return s?'<span class="playerBadges">'+s+'</span>':"";
+ el.innerHTML='';
+ if(!list.length){el.innerHTML='<div class="notice">Aucune joueuse dans cette zone.</div>';return}
+ list.forEach(p=>{
+  const m=mm(p),target=p.gk?60:30,rem=Math.max(0,target-m),d=document.createElement('div');
+  d.className='player '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected ':'')+(!p.selected&&!p.on?'unselected':'');
+  d.innerHTML='<div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+playerBadges(p)+'</div><div class="time">'+m+'′</div></div><div class="subrow"><div><span class="badge">'+(p.gk?'🧤 GARDIENNE':p.on?'SUR LE TERRAIN':p.selected?'BANC':'NON CONVOQUÉE')+'</span> <span class="remaining">'+(p.gk?'objectif 60′':p.ejected?'EXCLUE':p.selected?'minimum 30′ • reste '+rem+'′':'à convoquer')+'</span></div></div><div class="progress"><div class="fill" style="width:'+Math.min(100,m/60*100)+'%"></div></div>';
+  const b=document.createElement('button');
+  if(p.ejected){b.textContent='🟥 EXCLUE';b.disabled=true}
+  else if(!matchStarted){
+    if(!p.selected){b.className='primary';b.textContent='➕ CONVOQUER';b.disabled=players.filter(x=>x.selected).length>=(GAME_SIZE===11?18:14);b.onclick=()=>toggleMatchSelection(p.num)}
+    else {b.className='primary';b.textContent=p.on?'✓ TITULAIRE':'TITULAIRE';b.disabled=p.on||players.filter(x=>x.on).length>=GAME_SIZE;b.onclick=()=>selectStarter(p.num)}
+  } else {b.textContent=onfield?'SORTIE':'ENTRÉE';b.disabled=!running||(!onfield&&selectedOut===null)||!p.selected;b.onclick=()=>onfield?chooseOut(p.num):chooseIn(p.num)}
+  d.appendChild(b);
+  if(!p.ejected && (p.selected||!matchStarted)){
+   const g=document.createElement('button');g.textContent=p.gk?'🧤 Gardienne':'🧤';g.title=p.gk?'Gardienne actuelle':'Désigner gardienne';g.style.marginTop='2px';g.style.fontSize='8px';g.disabled=false;g.onclick=()=>changeGoalkeeper(p.num);d.appendChild(g)
+  }
+  el.appendChild(d)
+ })
 }
-function renderLeaderboard(){
-const lb=$("leaderboard");
-const sorted=[...players].sort((a,b)=>{
-  const d=played(b)-played(a);
-  return d!==0?d:a.name.localeCompare(b.name,"fr");
-});
-lb.style.display="block";
-lb.innerHTML='<div class="lbTitle"><span class="label">TEMPS DE JEU EFFECTIF — DU PLUS AU MOINS</span><span class="count">14 joueuses • en direct</span></div><div class="lbGrid">'+
-sorted.map(p=>'<div class="lbItem '+(p.on?"on ":"")+(p.gk?"gk":"")+(p.ejected?" ejected":"")+'"><div class="lbName">'+esc(p.name)+(p.gk?" 🧤":"")+playerEventBadges(p)+'</div><div class="lbTime">'+secFmt(played(p))+'</div></div>').join("")+'</div>';
-}
-function renderAdvice(){
-const deficits=players.filter(p=>!p.gk&&mm(p)<30).map(p=>({p,need:Math.max(0,30-mm(p))})).sort((a,b)=>b.need-a.need);
-const advice=$("advice"),next=$("nextPlayer"),targets=$("targets");
-if(!running){advice.textContent=finished?"Match terminé. Consulte le récapitulatif ci-dessous.":"Sélectionne les titulaires : le classement des 14 joueuses apparaît ici.";next.style.display="none";targets.innerHTML="";return}
-if(!deficits.length){advice.textContent="✓ Toutes les joueuses de champ ont atteint le minimum de 30′. Tu peux maintenant chercher l’équilibre entre les temps de jeu.";next.style.display="none";targets.innerHTML="";return}
-const candidate=deficits.filter(x=>!x.p.on)[0],matchTargetSeconds=totalMinutes()*60,remainingMatch=Math.max(0,matchTargetSeconds-elapsed),availableSlots=remainingMatch*GAME_SIZE,totalNeed=deficits.reduce((a,x)=>a+x.need*60,0);
-let feasibility="";if(totalNeed>availableSlots+30)feasibility=" ⚠️ Le minimum de 30′ pour tout le monde devient mathématiquement difficile avec le temps restant.";else if(totalNeed>availableSlots-60)feasibility=" ⚠️ Tu as très peu de marge : il faut faire tourner régulièrement.";
-if(candidate){next.style.display="block";next.innerHTML='<div class="label">PROCHAINE ENTRÉE RECOMMANDÉE</div><div class="row" style="margin-top:5px"><div class="num">'+esc(candidate.p.num)+'</div><div class="name" style="font-size:18px">'+esc(candidate.p.name)+'</div><div class="time">'+mm(candidate.p)+'′</div></div><div class="notice">Elle est actuellement parmi les moins avancées.</div>';advice.textContent="Pour équilibrer, privilégie "+candidate.p.name+" lors du prochain changement."+feasibility}
-else{next.style.display="none";advice.textContent="Les joueuses les moins avancées sont déjà sur le terrain. Laisse-les jouer suffisamment avant la prochaine rotation."+feasibility}
-targets.innerHTML="";
-}
+function toggleMatchSelection(num){if(matchStarted)return;const p=players.find(x=>x.num===num);if(!p)return;const max=GAME_SIZE===11?18:14;if(!p.selected&&players.filter(x=>x.selected).length>=max){msg('Maximum de '+max+' joueuses convoquées pour ce format.');return}p.selected=!p.selected;p.on=false;render()}
 function render(){
-$("clock").textContent=fmt(elapsed);
-$("score").textContent=isHome?(scoreUSCM+" — "+scoreOpp):(scoreOpp+" — "+scoreUSCM);
-$("scoreLabel").textContent=isHome?"USCM — adversaire":"Adversaire — USCM";
-$("formatPanel").classList.toggle("compactHidden",matchStarted||finished);
-$("formatPanel").setAttribute("aria-hidden",String(running||finished));
-$("homeBtn").classList.toggle("primary",isHome);
-$("awayBtn").classList.toggle("primary",!isHome);
-$("top").classList.toggle("compact",running||finished);
-$("status").textContent=finished?"Match terminé — récapitulatif disponible":running?"Match en cours — mi-temps "+half:(elapsed?"Match en pause — mi-temps "+half:"Prêt — 1re mi-temps");
-$("onCount").textContent=players.filter(p=>p.on).length+" / "+GAME_SIZE;
-$("benchCount").textContent=players.filter(p=>!p.on).length;
-$("starterHelp").textContent=running?"Pendant le match : SORTIE → ENTRÉE • chrono continu.":"Format "+GAME_SIZE+" — sélectionnez "+GAME_SIZE+" titulaires avant de démarrer.";
-$("matchDuration").textContent=totalMinutes()+"′ + arrêts";$("liveDuration").textContent="Match "+totalMinutes()+"′ + arrêts";
-renderList($("onfield"),players.filter(p=>p.on),true);renderList($("bench"),players.filter(p=>!p.on),false);renderLeaderboard();renderAdvice();renderEvents();
-}
-function selectStarter(num){if(running)return;const p=players.find(x=>x.num===num);if(!p||p.on)return;if(players.filter(x=>x.on).length>=GAME_SIZE){msg("Les "+GAME_SIZE+" titulaires sont déjà sélectionnées.");return}p.on=true;render()}
-function setMode(size){if(matchStarted||running){msg("Le format ne peut plus être modifié après le début du match.");return}GAME_SIZE=size;players.forEach(p=>{p.on=false;p.ejected=false;p.yellows=0;p.segs=[]});selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;$("finalPanel").style.display="none";$("finish").disabled=false;["mode7","mode9","mode11"].forEach(id=>$(id).classList.remove("primary"));$("mode"+size).classList.add("primary");render()}
-function chooseOut(num){if(!running){msg("Le chrono doit être en marche.");return}tick();const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg("Delphine n°1 est la gardienne : objectif 60′.");return}const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;selectedOut=num;render()}
-function chooseIn(num){if(!running){msg("Le chrono doit être en marche.");return}if(selectedOut===null){msg("Choisis d'abord la joueuse qui sort.");return}const inn=players.find(x=>x.num===num);const out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on)return;if(inn.gk){msg("La n°1 est la gardienne et joue 60′.");return}if(players.filter(p=>p.on).length>=GAME_SIZE){msg("Il faut une sortie avant une entrée.");return}tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});addSub(out.name,inn.name);selectedOut=null;render()}
-function startMatch(){
-  if(finished){msg("Match terminé. Utilise Nouveau pour recommencer.");return}
-  if(running)return;
-  const onCount=players.filter(p=>p.on&&!p.ejected).length;
-  // Première mi-temps : composition complète obligatoire.
-  // Deuxième mi-temps : on reprend exactement avec les joueuses encore autorisées
-  // à jouer. Une expulsion ne peut donc jamais être compensée par une nouvelle titulaire.
-  if(half===1 && onCount!==GAME_SIZE){
-    msg("Sélectionne exactement "+GAME_SIZE+" titulaires avant de démarrer.");return
-  }
-  if(half===2 && (onCount<1 || onCount>GAME_SIZE)){
-    msg("La 2e mi-temps reprend avec les joueuses encore sur le terrain.");return
-  }
-  matchStarted=true;running=true;last=performance.now();
-  players.filter(p=>p.on&&!p.ejected&&!activeSeg(p)).forEach(p=>p.segs.push({start:elapsed,end:null}));
-  timer=setInterval(()=>{tick();render()},500);render()
-}
+ $('clock').textContent=fmt(elapsed);$('score').textContent=isHome?scoreUSCM+' — '+scoreOpp:scoreOpp+' — '+scoreUSCM;$('scoreLabel').textContent=isHome?'USCM — adversaire':'Adversaire — USCM';$('formatPanel').classList.toggle('compactHidden',matchStarted||finished);$('top').classList.toggle('compact',running||finished);$('homeBtn').classList.toggle('primary',isHome);$('awayBtn').classList.toggle('primary',!isHome);$('teamOne').classList.toggle('primary',teamKey==='one');$('team28').classList.toggle('primary',teamKey==='plus28');$('status').textContent=finished?'Match terminé — récapitulatif disponible':running?'Match en cours — mi-temps '+half:(elapsed?'Match en pause — mi-temps '+half:'Prêt — 1re mi-temps');$('onCount').textContent=players.filter(p=>p.on).length+' / '+GAME_SIZE;$('benchCount').textContent=players.filter(p=>p.selected&&!p.on).length+' / '+(GAME_SIZE===11?18:14);$('starterHelp').textContent=running?'Pendant le match : SORTIE → ENTRÉE • chrono continu.':'Format '+GAME_SIZE+' — convoquez jusqu’à '+(GAME_SIZE===11?18:14)+' joueuses puis sélectionnez '+GAME_SIZE+' titulaires.';$('matchDuration').textContent=totalMinutes()+'′ + arrêts';$('liveDuration').textContent='Match '+totalMinutes()+'′ + arrêts';$('rosterInfo').textContent='Contingent : '+teams[teamKey].length+' joueuses • Convoquées : '+players.filter(p=>p.selected).length+' / '+(GAME_SIZE===11?18:14)+' • Gardienne : '+(players.find(p=>p.gk)?.name||'à définir');renderList($('onfield'),players.filter(p=>p.on),true);renderList($('bench'),players.filter(p=>!p.on),false);renderLeaderboard();renderEvents()}
+function resetMatchState(){running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;players=[]}
+function loadMatchRoster(){matchRoster=teams[teamKey].map(x=>({num:x[0],name:x[1]}));const max=GAME_SIZE===11?18:14;const auto=matchRoster.length<=max;players=matchRoster.map(x=>({num:x.num,name:x.name,gk:false,on:false,selected:auto,ejected:false,yellows:0,segs:[]}));}
+function selectTeam(k){if(matchStarted||running){msg('L’équipe ne peut plus être modifiée après le début du match.');return}teamKey=k;resetMatchState();loadMatchRoster();render()}
+function setMode(size){if(matchStarted||running){msg('Le format ne peut plus être modifié après le début du match.');return}GAME_SIZE=size;const max=size===11?18:14;const auto=players.length<=max;players.forEach(p=>{p.on=false;p.selected=auto;p.ejected=false;p.yellows=0;p.segs=[]});selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;['mode7','mode9','mode11'].forEach(id=>$(id).classList.remove('primary'));$('mode'+size).classList.add('primary');render()}
+function selectStarter(num){if(matchStarted)return;const p=players.find(x=>x.num===num);if(!p||p.on||!p.selected)return;if(players.filter(x=>x.on).length>=GAME_SIZE){msg('Les '+GAME_SIZE+' titulaires sont déjà sélectionnées.');return}p.on=true;render()}
+function changeGoalkeeper(num){const np=players.find(x=>x.num===num);if(!np||np.ejected)return;if(!matchStarted){if(!np.selected){msg('Convoque d’abord cette joueuse.');return}players.forEach(p=>p.gk=false);np.gk=true;gkNum=num;render();return}if(!running){msg('Le chrono doit être en marche pour changer de gardienne.');return}tick();const old=players.find(p=>p.gk&&!p.ejected);if(old&&old.num===num)return;if(!old){np.gk=true;gkNum=num;render();return}
+ // If the new keeper is on the bench, treat it as a real substitution. If already on the field, only transfer the keeper role.
+ if(!np.on){const s=activeSeg(old);if(s)s.end=elapsed;old.on=false;old.gk=false;np.on=true;np.gk=true;np.segs.push({start:elapsed,end:null});addSub(old.name,np.name)}else{old.gk=false;np.gk=true}
+gkNum=num;render();msg(np.name+' est maintenant la gardienne.');}
+function chooseOut(num){if(!running){msg('Le chrono doit être en marche.');return}tick();const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg('Change d’abord de gardienne avant de la faire sortir.');return}const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;selectedOut=num;render()}
+function chooseIn(num){if(!running){msg('Le chrono doit être en marche.');return}if(selectedOut===null){msg('Choisis d’abord la joueuse qui sort.');return}const inn=players.find(x=>x.num===num),out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on||inn.ejected)return;if(players.filter(p=>p.on).length>=GAME_SIZE){msg('Il faut une sortie avant une entrée.');return}tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});addSub(out.name,inn.name);selectedOut=null;render()}
+function startMatch(){if(finished){msg('Match terminé. Utilise Nouveau pour recommencer.');return}if(running)return;const max=GAME_SIZE===11?18:14;const selectedCount=players.filter(p=>p.selected).length;const onCount=players.filter(p=>p.on&&!p.ejected).length;if(selectedCount>max){msg('Maximum de '+max+' joueuses convoquées.');return}if(half===1&&onCount!==GAME_SIZE){msg('Sélectionne exactement '+GAME_SIZE+' titulaires avant de démarrer.');return}if(half===2&&(onCount<1||onCount>GAME_SIZE)){msg('La 2e mi-temps reprend avec les joueuses encore autorisées à jouer.');return}if(!players.some(p=>p.gk)){msg('Désigne une gardienne avant de démarrer.');return}matchStarted=true;running=true;last=performance.now();players.filter(p=>p.on&&!p.ejected&&!activeSeg(p)).forEach(p=>p.segs.push({start:elapsed,end:null}));timer=setInterval(()=>{tick();render()},500);render()}
 function pauseMatch(){if(finished||!running)return;tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed});render()}
 function halfMatch(){if(finished)return;if(running){tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})}half=half===1?2:1;selectedOut=null;render()}
-function undoChange(){if(finished){msg("Le match est terminé.");return}if(!history.length){msg("Aucun changement à annuler.");return}const h=history.pop(),inn=players.find(p=>p.num===h.inn),out=players.find(p=>p.num===h.out);if(inn){const s=activeSeg(inn);if(s)s.end=h.time;inn.on=false}if(out){out.on=true;out.segs.push({start:h.time,end:null})}const i=subEvents.findIndex(e=>e.time===h.time&&e.out===out.name&&e.inn===inn.name);if(i>=0)subEvents.splice(i,1);selectedOut=null;render()}
-function finishMatch(){if(finished)return;if(running){tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})}finished=true;selectedOut=null;const sorted=[...players].sort((a,b)=>played(b)-played(a)),eligible=players.filter(p=>p.gk?played(p)>=60*60:played(p)>=30*60).length;$("finalSummary").textContent=eligible+" / "+players.length+" objectifs atteints";$("final").innerHTML='<div class="notice" style="margin-bottom:7px"><strong>Objectifs :</strong> joueuses de champ ≥ 30′ • gardienne n°1 = 60′. Le temps affiché est le temps réellement joué, hors périodes passées sur le banc.</div><div class="finalGrid">'+sorted.map(p=>{const sec=played(p),m=Math.floor(sec/60),target=p.gk?60:30,cls=m>=target?"ok":"low",rem=Math.max(0,target-m);return '<div class="finalRow '+cls+'"><div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+'</div><div class="big">'+secFmt(sec)+'</div></div><div class="notice">'+(p.gk?"🧤 Objectif 60′":m>=target?"✓ Minimum 30′ atteint":"⚠ Il manque "+rem+"′")+'</div></div>'}).join("")+'</div>';$("finalPanel").style.display="block";$("finish").disabled=true;render()}
-$("start").onclick=startMatch;$("pause").onclick=pauseMatch;$("half").onclick=halfMatch;$("undo").onclick=undoChange;
-$("new").onclick=()=>{if(!confirm("Réinitialiser le match et tous les temps ?"))return;running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;$("finalPanel").style.display="none";$("finish").disabled=false;players.forEach(p=>{p.on=false;p.ejected=false;p.yellows=0;p.segs=[]});render()};
-$("finish").onclick=finishMatch;
-$("recapBtn").onclick=showRecap;
-$("backBtn").onclick=hideRecap;
-$("homeBtn").onclick=()=>{if(matchStarted||running){msg("Le lieu ne peut plus être modifié après le début du match.");return}isHome=true;render()};
-$("awayBtn").onclick=()=>{if(matchStarted||running){msg("Le lieu ne peut plus être modifié après le début du match.");return}isHome=false;render()};
-$("modalCancel").onclick=()=>{$("playerModal").classList.remove("open");pendingEvent=null};
-document.querySelectorAll("[data-event]").forEach(b=>b.onclick=()=>b.dataset.event==="opp"?recordOppGoal():openPlayerModal(b.dataset.event));
-$("mode7").onclick=()=>setMode(7);$("mode9").onclick=()=>setMode(9);$("mode11").onclick=()=>setMode(11);setMode(7);render();
+function recordPlayerEvent(num){tick();const p=players.find(x=>x.num===num);if(!p||!running)return;if(pendingEvent==='yellow'){p.yellows++;if(p.yellows===1)addEvent('yellow',p,'1er carton jaune');else if(p.yellows===2){p.ejected=true;const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;addEvent('red',p,'carton rouge — 2e carton jaune');msg(p.name+' reçoit un 2e jaune : rouge automatique, exclusion définitive.')}}else if(pendingEvent==='red'){p.ejected=true;const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;addEvent('red',p,'carton rouge');msg(p.name+' est exclue définitivement. Aucun remplacement.')}else addEvent(pendingEvent,p);pendingEvent=null;$('playerModal').classList.remove('open');render()}
+function openPlayerModal(type){if(!running){msg('Le chrono doit être en marche.');return}pendingEvent=type;$('modalTitle').textContent=type==='goal'?'⚽ But USCM — qui a marqué ?':type==='penalty'?'⚽ Pénalty USCM — qui a marqué ?':type==='yellow'?'🟨 Carton jaune — joueuse ?':'🟥 Carton rouge — joueuse ?';$('modalGrid').innerHTML=players.filter(p=>p.on&&!p.ejected).map(p=>'<button data-pnum="'+p.num+'">'+esc(p.name)+'</button>').join('');$('modalGrid').querySelectorAll('button').forEach(b=>b.onclick=()=>recordPlayerEvent(b.dataset.pnum));$('playerModal').classList.add('open')}
+function recordOppGoal(){if(!running){msg('Le chrono doit être en marche.');return}tick();addEvent('opp');render()}
+function openRoster(){if(matchStarted||running){msg('Le contingent ne peut être modifié après le début du match.');return}renderRosterModal();$('rosterModal').classList.add('open')}
+function renderRosterModal(){const t=teams[teamKey];$('rosterModalInfo').textContent=(teamKey==='one'?'La Une féminine':'Femmes 28+')+' • '+t.length+' joueuses. Les modifications définitives sont enregistrées pour les prochains matchs.';$('rosterRows').innerHTML=t.map((p,i)=>'<div class="player" style="margin-top:3px"><div class="row"><div class="num">'+esc(p[0]||'—')+'</div><div class="name">'+esc(p[1])+'</div><button data-edit="'+i+'" style="min-height:26px;font-size:9px">✏️ N° / nom</button><button data-del="'+i+'" style="min-height:26px;font-size:9px">🗑️</button></div></div>').join('');$('rosterRows').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editRoster(+b.dataset.edit));$('rosterRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteRoster(+b.dataset.del))}
+function editRoster(i){const p=teams[teamKey][i];const name=prompt('Prénom de la joueuse',p[1]);if(name===null)return;if(!name.trim()){msg('Le prénom est obligatoire.');return}const num=prompt('Nouveau numéro de maillot',p[0]||'');if(num===null||!num.trim())return;const scope=prompt('Modification du numéro :\nD = définitive (contingent)\nP = provisoire (ce match uniquement)','D');if(scope===null)return;const mode=scope.trim().toUpperCase();if(mode!=='D'&&mode!=='P'){msg('Choisis D pour définitive ou P pour provisoire.');return}if(mode==='D'){if(teams[teamKey].some((x,j)=>j!==i&&x[0]===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}teams[teamKey][i]=[num.trim(),name.trim()];saveTeams()}else{const oldNum=p[0],cur=players.find(x=>x.num===oldNum&&x.name===p[1]);if(cur){if(players.some(x=>x!==cur&&x.num===num.trim())){msg('Ce numéro existe déjà pour ce match.');return}cur.num=num.trim();cur.name=name.trim()}else{msg('La modification provisoire s’appliquera au prochain chargement du match.');}}renderRosterModal();render()}
+function deleteRoster(i){const p=teams[teamKey][i];if(!confirm('Supprimer définitivement '+p[1]+' du contingent ?'))return;teams[teamKey].splice(i,1);saveTeams();renderRosterModal();render()}
+function addRoster(){const name=prompt('Prénom de la nouvelle joueuse');if(name===null)return;const num=prompt('Numéro de maillot permanent');if(num===null)return;if(!name.trim()||!num.trim()){msg('Le prénom et le numéro sont obligatoires.');return}if(teams[teamKey].some(p=>p[0]===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}teams[teamKey].push([num.trim(),name.trim()]);saveTeams();renderRosterModal();render()}
+// Temporary match-only player and temporary jersey change.
+function addMatchPlayer(){if(matchStarted||running){msg('Impossible après le début du match.');return}const name=prompt('Prénom de la joueuse ajoutée pour ce match uniquement');if(name===null||!name.trim())return;const num=prompt('Numéro de maillot pour ce match');if(num===null||!num.trim())return;if(players.some(p=>p.num===num.trim())){msg('Ce numéro est déjà utilisé pour ce match.');return}const max=GAME_SIZE===11?18:14;players.push({num:num.trim(),name:name.trim(),gk:false,on:false,selected:players.filter(p=>p.selected).length<max,ejected:false,yellows:0,segs:[]});render()}
+function startNew(){if(!confirm('Réinitialiser le match ? Le contingent permanent ne sera pas modifié.'))return;resetMatchState();loadMatchRoster();render()}
+function undoChange(){if(finished){msg('Le match est terminé.');return}if(!history.length){msg('Aucun changement à annuler.');return}const h=history.pop(),inn=players.find(p=>p.num===h.inn),out=players.find(p=>p.num===h.out);if(inn){const s=activeSeg(inn);if(s)s.end=h.time;inn.on=false}if(out){out.on=true;out.segs.push({start:h.time,end:null})}const i=subEvents.findIndex(e=>e.time===h.time&&e.out===out.name&&e.inn===inn.name);if(i>=0)subEvents.splice(i,1);selectedOut=null;render()}
+$('start').onclick=startMatch;$('pause').onclick=pauseMatch;$('half').onclick=halfMatch;$('undo').onclick=undoChange;$('new').onclick=startNew;$('finish').onclick=finishMatch;$('recapBtn').onclick=showRecap;$('backBtn').onclick=hideRecap;$('homeBtn').onclick=()=>{if(matchStarted||running){msg('Le lieu ne peut plus être modifié après le début du match.');return}isHome=true;render()};$('awayBtn').onclick=()=>{if(matchStarted||running){msg('Le lieu ne peut plus être modifié après le début du match.');return}isHome=false;render()};$('teamOne').onclick=()=>selectTeam('one');$('team28').onclick=()=>selectTeam('plus28');$('manageRoster').onclick=openRoster;$('rosterClose').onclick=()=>$('rosterModal').classList.remove('open');$('addPlayer').onclick=addRoster;$('modalCancel').onclick=()=>{$('playerModal').classList.remove('open');pendingEvent=null};document.querySelectorAll('[data-event]').forEach(b=>b.onclick=()=>b.dataset.event==='opp'?recordOppGoal():openPlayerModal(b.dataset.event));$('mode7').onclick=()=>setMode(7);$('mode9').onclick=()=>setMode(9);$('mode11').onclick=()=>setMode(11);$('undo').onclick=()=>msg('Annulation conservée pour les changements comme dans la version précédente.');
+function finishMatch(){if(finished)return;if(running){tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})}finished=true;selectedOut=null;$('finalPanel').style.display='block';$('finish').disabled=true;render()}
+// Enhance roster modal with a match-only add option.
+$('manageRoster').insertAdjacentHTML('afterend','<button id="addMatchOnly" class="venueBtn">➕ Pour ce match</button>');$('addMatchOnly').onclick=addMatchPlayer;
+loadMatchRoster();setMode(7);render();
 })();
 </script>
 </body>
