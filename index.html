@@ -358,7 +358,11 @@ function syncTeamFormatUI(){
   $('mode'+GAME_SIZE).classList.add('primary');
 }
 function applyTeamRules(){syncTeamFormatUI()}
-function renderLeaderboard(){const sorted=[...players].sort((a,b)=>{const d=played(b)-played(a);return d||a.name.localeCompare(b.name,'fr')});$("leaderboard").innerHTML='<div class="lbTitle"><span class="label">TEMPS DE JEU EFFECTIF — DU PLUS AU MOINS</span><span class="count">'+players.length+' joueuses • en direct</span></div><div class="lbGrid" style="grid-template-rows:repeat('+Math.ceil(sorted.length/2)+',minmax(0,1fr))">'+sorted.map(p=>'<div class="lbItem '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected':'')+'"><div class="lbName">'+esc(p.name)+(p.gk?' 🧤':'')+playerBadges(p)+'</div><div class="lbTime">'+secFmt(played(p))+'</div></div>').join('')+'</div>'}
+function renderLeaderboard(){
+ const source=matchStarted?players.filter(p=>p.selected):players;
+ const sorted=[...source].sort((a,b)=>{const d=played(b)-played(a);return d||a.name.localeCompare(b.name,'fr')});
+ $("leaderboard").innerHTML='<div class="lbTitle"><span class="label">TEMPS DE JEU EFFECTIF — DU PLUS AU MOINS</span><span class="count">'+source.length+' joueuses • en direct</span></div><div class="lbGrid" style="grid-template-rows:repeat('+Math.ceil(sorted.length/2)+',minmax(0,1fr))">'+sorted.map(p=>'<div class="lbItem '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected':'')+'"><div class="lbName">'+esc(p.name)+(p.gk?' 🧤':'')+playerBadges(p)+'</div><div class="lbTime">'+secFmt(played(p))+'</div></div>').join('')+'</div>'
+}
 function renderEvents(){
  $('subCount').textContent=subEvents.length+' changement'+(subEvents.length>1?'s':'');$('eventCount').textContent=events.length+' événement'+(events.length>1?'s':'');
  $('subEvents').innerHTML=subEvents.length?subEvents.map(e=>'<div class="eventItem"><span>🔄</span><span class="evtText"><span class="changeOut">'+esc(e.out)+'</span> → <span class="changeIn">'+esc(e.inn)+'</span></span><span class="evtTime">'+fmt(e.time)+'</span></div>').join(''):'<div class="eventEmpty">Aucun changement enregistré.</div>';
@@ -392,7 +396,7 @@ function renderList(el,list,onfield){
     }
   }else{
     b.textContent=onfield?'SORTIE':'ENTRÉE';
-    b.disabled=!running||(!onfield&&selectedOut===null)||!p.selected;
+    b.disabled=(!running&&half!==2)||(!onfield&&selectedOut===null)||!p.selected;
     b.onclick=()=>onfield?chooseOut(p.num):chooseIn(p.num);
   }
   d.appendChild(b);
@@ -457,12 +461,12 @@ function setMode(size){
   render();
 }
 function selectStarter(num){if(matchStarted)return;const p=players.find(x=>x.num===num);if(!p||p.on||!p.selected)return;if(players.filter(x=>x.on).length>=GAME_SIZE){msg('Les '+GAME_SIZE+' titulaires sont déjà sélectionnées.');return}p.on=true;render()}
-function changeGoalkeeper(num){const np=players.find(x=>x.num===num);if(!np||np.ejected)return;if(!matchStarted){if(!np.selected){msg('Convoque d’abord cette joueuse.');return}players.forEach(p=>p.gk=false);np.gk=true;gkNum=num;render();return}if(!running){msg('Le chrono doit être en marche pour changer de gardienne.');return}tick();const old=players.find(p=>p.gk&&!p.ejected);if(old&&old.num===num)return;if(!old){np.gk=true;gkNum=num;render();return}
+function changeGoalkeeper(num){const np=players.find(x=>x.num===num);if(!np||np.ejected)return;if(!matchStarted){if(!np.selected){msg('Convoque d’abord cette joueuse.');return}players.forEach(p=>p.gk=false);np.gk=true;gkNum=num;render();return}if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche pour changer de gardienne.');return}if(running)tick();const old=players.find(p=>p.gk&&!p.ejected);if(old&&old.num===num)return;if(!old){np.gk=true;gkNum=num;render();return}
  // If the new keeper is on the bench, treat it as a real substitution. If already on the field, only transfer the keeper role.
  if(!np.on){const s=activeSeg(old);if(s)s.end=elapsed;old.on=false;old.gk=false;np.on=true;np.gk=true;np.segs.push({start:elapsed,end:null});addSub(old.name,np.name)}else{old.gk=false;np.gk=true}
 gkNum=num;render();msg(np.name+' est maintenant la gardienne.');}
-function chooseOut(num){if(!running){msg('Le chrono doit être en marche.');return}tick();const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg('Change d’abord de gardienne avant de la faire sortir.');return}const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;selectedOut=num;render()}
-function chooseIn(num){if(!running){msg('Le chrono doit être en marche.');return}if(selectedOut===null){msg('Choisis d’abord la joueuse qui sort.');return}const inn=players.find(x=>x.num===num),out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on||inn.ejected)return;if(players.filter(p=>p.on).length>=GAME_SIZE){msg('Il faut une sortie avant une entrée.');return}tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});addSub(out.name,inn.name);selectedOut=null;render()}
+function chooseOut(num){if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche.');return}if(running)tick();const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg('Change d’abord de gardienne avant de la faire sortir.');return}const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;selectedOut=num;render()}
+function chooseIn(num){if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche.');return}if(selectedOut===null){msg('Choisis d’abord la joueuse qui sort.');return}const inn=players.find(x=>x.num===num),out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on||inn.ejected)return;if(players.filter(p=>p.on).length>=GAME_SIZE){msg('Il faut une sortie avant une entrée.');return}if(running)tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});addSub(out.name,inn.name);selectedOut=null;render()}
 
 function startMatch(){if(finished){msg('Match terminé. Utilise Nouveau pour recommencer.');return}if(running)return;const max=GAME_SIZE===11?18:14;const selectedCount=players.filter(p=>p.selected).length;const onCount=players.filter(p=>p.on&&!p.ejected).length;if(selectedCount>max){msg('Maximum de '+max+' joueuses convoquées.');return}if(half===1&&onCount!==GAME_SIZE){msg('Sélectionne exactement '+GAME_SIZE+' titulaires avant de démarrer.');return}if(half===2&&(onCount<1||onCount>GAME_SIZE)){msg('La 2e mi-temps reprend avec les joueuses encore autorisées à jouer.');return}if(!players.some(p=>p.gk)){msg('Désigne une gardienne avant de démarrer.');return}matchStarted=true;running=true;last=performance.now();players.filter(p=>p.on&&!p.ejected&&!activeSeg(p)).forEach(p=>p.segs.push({start:elapsed,end:null}));timer=setInterval(()=>{tick();render()},500);render()}
 function pauseMatch(){if(finished||!running)return;tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed});render()}
