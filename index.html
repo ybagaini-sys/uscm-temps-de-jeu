@@ -349,7 +349,6 @@ function looksLike28(arr){
   return names.has("Katia") && names.has("Adelina") && names.has("Maryline") && names.has("Gordana");
 }
 function cloneTeams(x){return JSON.parse(JSON.stringify(x))}
-function validRoster(arr){return Array.isArray(arr)&&arr.every(x=>Array.isArray(x)&&x.length>=2&&String(x[0]).trim()&&String(x[1]).trim())}
 function normalizeRoster(arr){
  return (Array.isArray(arr)?arr:[]).filter(x=>Array.isArray(x)&&x.length>=2&&String(x[1]).trim()).map(x=>[String(x[0]??'').trim(),String(x[1]).trim()]);
 }
@@ -357,7 +356,9 @@ function validTeams(x){return !!(x&&validRoster(x.one)&&validRoster(x.plus28))}
 function getBaseTeams(){
   try{
     const b=JSON.parse(localStorage.getItem(BASE_STORAGE));
-    if(validTeams(b))return b;
+    // BASE_STORAGE is a locked reference. Never trust an old/corrupted
+    // browser value unless both contingents are recognizably correct.
+    if(validTeams(b)&&looksLikeUne(b.one)&&looksLike28(b.plus28))return b;
   }catch(e){}
   const b=cloneTeams(DEFAULT_TEAMS);
   try{localStorage.setItem(BASE_STORAGE,JSON.stringify(b))}catch(e){}
