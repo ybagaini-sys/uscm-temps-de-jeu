@@ -8,7 +8,6 @@
 <meta name="theme-color" content="#f3f5f9">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="USCM Temps de jeu">
-<link rel="apple-touch-icon" href="./icon-192.png">
 <style>
 :root{--bg:#f3f5f9;--card:#fff;--text:#172033;--muted:#697386;--line:#d8dee9;--accent:#356fc4;--accent2:#eaf1ff;--ok:#eaf7ed;--warn:#fff5df;--danger:#a42626}
 *{box-sizing:border-box}
@@ -402,6 +401,123 @@ const $=id=>document.getElementById(id);
 const DURATIONS={7:60,9:60,11:90};
 let GAME_SIZE=7,matchStarted=false,running=false,last=0,elapsed=0,half=1,timer=null,finished=false,selectedOut=null,history=[],events=[],subEvents=[],pendingEvent=null,scoreUSCM=0,scoreOpp=0,isHome=true,opponentName='',matchDate='';
 let matchRoster=[],players=[],gkNum=null;
+const MATCH_STATE_PREFIX='uscm_temps_de_jeu_match_v1_';
+let saveMatchTimer=null;
+let restoredMatchState=false;
+
+function matchStateKey(k=teamKey){return MATCH_STATE_PREFIX+k}
+
+function serializeMatchState(){
+  return {
+    version:1,
+    teamKey,
+    GAME_SIZE,
+    matchStarted,
+    running,
+    elapsed,
+    half,
+    finished,
+    selectedOut,
+    history,
+    events,
+    subEvents,
+    pendingEvent,
+    scoreUSCM,
+    scoreOpp,
+    isHome,
+    opponentName,
+    matchDate,
+    gkNum,
+    players:players.map(p=>({
+      num:String(p.num), name:String(p.name), gk:!!p.gk, on:!!p.on,
+      selected:!!p.selected, ejected:!!p.ejected, yellows:Number(p.yellows||0),
+      segs:Array.isArray(p.segs)?p.segs.map(x=>({start:Number(x.start||0),end:x.end===null?null:Number(x.end||0)})):[]
+    })),
+    savedAt:Date.now()
+  };
+}
+
+function persistMatchState(immediate=false){
+  if(saveMatchTimer){clearTimeout(saveMatchTimer);saveMatchTimer=null}
+  const write=()=>{
+    try{localStorage.setItem(matchStateKey(),JSON.stringify(serializeMatchState()))}catch(e){}
+  };
+  if(immediate) write();
+  else saveMatchTimer=setTimeout(()=>{saveMatchTimer=null;write()},250);
+}
+
+function clearSavedMatchState(k=teamKey){
+  try{localStorage.removeItem(matchStateKey(k))}catch(e){}
+}
+
+function mergeRosterWithSaved(savedPlayers){
+  const roster=getTeamRoster();
+  const savedByNum=new Map((savedPlayers||[]).map(p=>[String(p.num),p]));
+  const rosterNums=new Set(roster.map(x=>String(x[0])));
+  const merged=roster.map(x=>{
+    const num=String(x[0]), name=String(x[1]), old=savedByNum.get(num);
+    return old ? {
+      num, name,
+      gk:!!old.gk,on:!!old.on,selected:!!old.selected,ejected:!!old.ejected,
+      yellows:Number(old.yellows||0),
+      segs:Array.isArray(old.segs)?old.segs.map(z=>({start:Number(z.start||0),end:z.end===null?null:Number(z.end||0)})):[]
+    } : {num,name,gk:false,on:false,selected:false,ejected:false,yellows:0,segs:[]};
+  });
+  // Preserve temporary match-only players even though they are not in the permanent roster.
+  (savedPlayers||[]).forEach(p=>{
+    if(!rosterNums.has(String(p.num))){
+      merged.push({
+        num:String(p.num),name:String(p.name),gk:!!p.gk,on:!!p.on,selected:!!p.selected,
+        ejected:!!p.ejected,yellows:Number(p.yellows||0),
+        segs:Array.isArray(p.segs)?p.segs.map(z=>({start:Number(z.start||0),end:z.end===null?null:Number(z.end||0)})):[]
+      });
+    }
+  });
+  return merged;
+}
+
+function restoreSavedMatchState(){
+  restoredMatchState=false;
+  let saved=null;
+  try{saved=JSON.parse(localStorage.getItem(matchStateKey()))}catch(e){saved=null}
+  if(!saved || saved.version!==1 || saved.teamKey!==teamKey) return false;
+  if(Number(saved.GAME_SIZE)!==(teamKey==='one'?11:Number(saved.GAME_SIZE))) return false;
+
+  GAME_SIZE=teamKey==='one'?11:Number(saved.GAME_SIZE||11);
+  matchStarted=!!saved.matchStarted;
+  running=!!saved.running;
+  elapsed=Math.max(0,Number(saved.elapsed||0));
+  half=Number(saved.half||1);
+  finished=!!saved.finished;
+  selectedOut=saved.selectedOut??null;
+  history=Array.isArray(saved.history)?saved.history:[];
+  events=Array.isArray(saved.events)?saved.events:[];
+  subEvents=Array.isArray(saved.subEvents)?saved.subEvents:[];
+  pendingEvent=saved.pendingEvent??null;
+  scoreUSCM=Number(saved.scoreUSCM||0);
+  scoreOpp=Number(saved.scoreOpp||0);
+  isHome=saved.isHome!==false;
+  opponentName=String(saved.opponentName||'');
+  matchDate=String(saved.matchDate||localDateISO());
+  gkNum=saved.gkNum??null;
+  players=mergeRosterWithSaved(saved.players);
+  matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
+
+  // If the page was suspended while the match was actually running, restore elapsed
+  // from wall-clock time since the last persistence point.
+  if(running){
+    const savedAt=Number(saved.savedAt||0);
+    if(savedAt>0){
+      elapsed += Math.max(0,(Date.now()-savedAt)/1000);
+    }
+    last=performance.now();
+    clearInterval(timer);
+    timer=setInterval(()=>{tick();render()},500);
+  }
+  restoredMatchState=true;
+  return true;
+}
+
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fmt(s){s=Math.max(0,Math.floor(s));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
 function secFmt(s){return fmt(s)}
@@ -531,6 +647,7 @@ function enforceGoalkeeperInvariant(){
  return true;
 }
 function render(){enforceGoalkeeperInvariant();
+  persistMatchState();
  $('clock').textContent=fmt(elapsed);$('score').textContent=isHome?scoreUSCM+' — '+scoreOpp:scoreOpp+' — '+scoreUSCM;$('scoreLabel').textContent=isHome?'USCM — '+opponentLabel():opponentLabel()+' — USCM';$('formatPanel').classList.toggle('compactHidden',matchStarted||finished);$('top').classList.toggle('compact',running||finished);$('homeBtn').classList.toggle('primary',isHome);$('awayBtn').classList.toggle('primary',!isHome);$('teamOne').classList.toggle('primary',teamKey==='one');$('team28').classList.toggle('primary',teamKey==='plus28');$('status').textContent=finished?'Match terminé — récapitulatif disponible':running?'Match en cours — mi-temps '+half:(elapsed?'Match en pause — mi-temps '+half:'Prêt — 1re mi-temps');$('finish').disabled=finished;$('half').disabled=finished||!matchStarted||half!==1;$('onCount').textContent=players.filter(p=>p.on).length+' / '+GAME_SIZE;$('benchCount').textContent=players.filter(p=>p.selected&&!p.on).length+' / '+(GAME_SIZE===11?18:14);$('starterHelp').textContent=running?'Pendant le match : SORTIE → ENTRÉE • chrono continu.':'Format '+GAME_SIZE+' — convoquez jusqu’à '+(GAME_SIZE===11?18:14)+' joueuses, puis sélectionnez '+GAME_SIZE+' titulaires. Utilisez CONVOQUER pour chaque joueuse présente. Avant démarrage : corrections possibles.';$('matchDuration').textContent=totalMinutes()+'′ + arrêts';$('liveDuration').textContent='Match '+totalMinutes()+'′ + arrêts';$('rosterInfo').textContent='Contingent : '+teams[teamKey].length+' joueuses • Convoquées : '+players.filter(p=>p.selected).length+' / '+(GAME_SIZE===11?18:14)+' • Gardienne : '+(players.find(p=>p.gk)?.name||'à définir');
 if($('opponentName'))$('opponentName').value=opponentName;
 if($('matchDate'))$('matchDate').value=matchDate;
@@ -543,9 +660,10 @@ if(!matchStarted){
   renderList($('bench'),players.filter(p=>p.selected&&!p.on),false);
 }
 renderLeaderboard();renderEvents()}
-function resetMatchState(){
+function resetMatchState(clearSaved=true){
  running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;players=[];
  opponentName='';matchDate=localDateISO();
+ if(clearSaved)clearSavedMatchState();
 }
 function loadMatchRoster(){
   const roster=getTeamRoster();
@@ -560,9 +678,12 @@ function selectTeam(k){
   if(matchStarted||running){msg('L’équipe ne peut plus être modifiée après le début du match.');return}
   if(k!=='one' && k!=='plus28')return;
   teamKey=k;
-  resetMatchState();
   GAME_SIZE=(teamKey==='one')?11:7;
-  loadMatchRoster();
+  if(!restoreSavedMatchState()){
+    resetMatchState();
+    GAME_SIZE=(teamKey==='one')?11:7;
+    loadMatchRoster();
+  }
   syncTeamFormatUI();
   render();
 }
@@ -570,6 +691,7 @@ function setMode(size){
   if(teamKey==="one" && size!==11){msg("La Une féminine joue obligatoirement à 11.");return}
   if(matchStarted||running){msg('Le format ne peut plus être modifié après le début du match.');return}
   GAME_SIZE=size;
+  clearSavedMatchState();
   players.forEach(p=>{p.on=false;p.selected=false;p.ejected=false;p.yellows=0;p.segs=[]});
   selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;
   syncTeamFormatUI();
@@ -601,7 +723,7 @@ function resetCurrentTeamToBase(){
   const base=getBaseTeams();
   teams[teamKey]=cloneTeams(base[teamKey]);
   saveTeams();
-  resetMatchState();
+  resetMatchState(true);
   GAME_SIZE=(teamKey==='one')?11:7;
   loadMatchRoster();
   syncTeamFormatUI();
@@ -620,7 +742,7 @@ function deleteRoster(i){const p=teams[teamKey][i];if(!confirm('Supprimer défin
 function addRoster(){const name=prompt('Prénom de la nouvelle joueuse');if(name===null)return;const num=prompt('Numéro de maillot permanent');if(num===null)return;if(!name.trim()||!num.trim()){msg('Le prénom et le numéro sont obligatoires.');return}if(teams[teamKey].some(p=>p[0]===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}teams[teamKey].push([num.trim(),name.trim()]);saveTeams();renderRosterModal();render()}
 // Temporary match-only player and temporary jersey change.
 function addMatchPlayer(){if(matchStarted||running){msg('Impossible après le début du match.');return}const name=prompt('Prénom de la joueuse ajoutée pour ce match uniquement');if(name===null||!name.trim())return;const num=prompt('Numéro de maillot pour ce match');if(num===null||!num.trim())return;if(players.some(p=>p.num===num.trim())){msg('Ce numéro est déjà utilisé pour ce match.');return}const max=GAME_SIZE===11?18:14;players.push({num:num.trim(),name:name.trim(),gk:false,on:false,selected:players.filter(p=>p.selected).length<max,ejected:false,yellows:0,segs:[]});render()}
-function startNew(){if(!confirm('Réinitialiser le match ? Le contingent permanent ne sera pas modifié.'))return;resetMatchState();loadMatchRoster();render()}
+function startNew(){if(!confirm('Réinitialiser le match ? Le contingent permanent ne sera pas modifié.'))return;resetMatchState(true);loadMatchRoster();render()}
 function undoChange(){if(finished){msg('Le match est terminé.');return}if(!history.length){msg('Aucun changement à annuler.');return}const h=history.pop(),inn=players.find(p=>p.num===h.inn),out=players.find(p=>p.num===h.out);if(inn){const s=activeSeg(inn);if(s)s.end=h.time;inn.on=false}if(out){out.on=true;out.segs.push({start:h.time,end:null})}const i=subEvents.findIndex(e=>e.time===h.time&&e.out===out.name&&e.inn===inn.name);if(i>=0)subEvents.splice(i,1);selectedOut=null;render()}
 $('opponentName').addEventListener('input',e=>{if(!matchStarted&&!running){opponentName=e.target.value;render()}});
 $('matchDate').addEventListener('change',e=>{if(!matchStarted&&!running){matchDate=e.target.value;render()}});
@@ -642,17 +764,24 @@ function finishMatch(){
 }
 // Enhance roster modal with a match-only add option.
 $('manageRoster').insertAdjacentHTML('afterend','<button type="button" id="addMatchOnly" class="venueBtn">➕ Pour ce match</button>');$('addMatchOnly').onclick=addMatchPlayer;
-teamKey="one"; GAME_SIZE=11; matchDate=localDateISO(); syncTeamFormatUI(); loadMatchRoster(); render();
+teamKey="one"; GAME_SIZE=11;
+if(!restoreSavedMatchState()){
+  matchDate=localDateISO();
+  syncTeamFormatUI();
+  loadMatchRoster();
+}else{
+  syncTeamFormatUI();
+}
+render();
+window.addEventListener('pagehide',()=>persistMatchState(true));
+window.addEventListener('beforeunload',()=>persistMatchState(true));
 })();
 
-// V31 — offline/PWA support. The application remains fully functional without network
-// once it has been opened successfully online and the service worker has been installed.
+</script>
+<script>
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.protocol === 'http:')) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js', {scope:'./'}).catch(() => {});
-  });
+  window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(()=>{}));
 }
-
 </script>
 </body>
 </html>
