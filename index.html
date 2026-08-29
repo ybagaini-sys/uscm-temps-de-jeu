@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>USCM — Temps de jeu</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#f3f5f9">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="USCM Temps de jeu">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <style>
 :root{--bg:#f3f5f9;--card:#fff;--text:#172033;--muted:#697386;--line:#d8dee9;--accent:#356fc4;--accent2:#eaf1ff;--ok:#eaf7ed;--warn:#fff5df;--danger:#a42626}
 *{box-sizing:border-box}
@@ -639,6 +644,14 @@ function finishMatch(){
 $('manageRoster').insertAdjacentHTML('afterend','<button type="button" id="addMatchOnly" class="venueBtn">➕ Pour ce match</button>');$('addMatchOnly').onclick=addMatchPlayer;
 teamKey="one"; GAME_SIZE=11; matchDate=localDateISO(); syncTeamFormatUI(); loadMatchRoster(); render();
 })();
+
+// V31 — offline/PWA support. The application remains fully functional without network
+// once it has been opened successfully online and the service worker has been installed.
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.protocol === 'http:')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', {scope:'./'}).catch(() => {});
+  });
+}
 
 </script>
 </body>
