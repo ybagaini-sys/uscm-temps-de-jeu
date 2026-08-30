@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>USCM — Temps de jeu</title>
-<meta name="uscm-build" content="V34.2-MOBILE-PERSISTANCE-HORS-LIGNE">
+<meta name="uscm-build" content="V34.5-MOBILE-IPAD-FIX-PERSISTANCE-HORS-LIGNE">
 <link rel="manifest" href="./manifest.webmanifest">
 <meta name="theme-color" content="#f3f5f9">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -815,7 +815,9 @@ function renderList(el,list,onfield){
     actions.appendChild(b);
   }
   // Mobile pre-match: keep action controls on the same row as the player.
-  if(!matchStarted){
+  // IMPORTANT: this is mobile-only. On iPad/desktop the actions stay below
+  // the player card so the compact multi-column roster remains readable.
+  if(!matchStarted && window.matchMedia('(max-width:700px)').matches){
     actions.classList.add('inlinePlayerActions');
     const row=d.querySelector('.row');
     if(row) row.appendChild(actions); else d.appendChild(actions);
