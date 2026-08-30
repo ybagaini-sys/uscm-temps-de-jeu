@@ -596,6 +596,7 @@ const DURATIONS={7:60,9:60,11:90};
 let GAME_SIZE=7,matchStarted=false,running=false,last=0,elapsed=0,half=1,timer=null,finished=false,selectedOut=null,history=[],events=[],subEvents=[],pendingEvent=null,scoreUSCM=0,scoreOpp=0,isHome=true,opponentName='',matchDate='';
 let matchRoster=[],players=[],gkNum=null;
 const MATCH_STATE_PREFIX='uscm_temps_de_jeu_match_v1_';
+let half2StartElapsed=0;
 let saveMatchTimer=null;
 let restoredMatchState=false;
 
@@ -610,6 +611,7 @@ function serializeMatchState(){
     running,
     elapsed,
     half,
+    half2StartElapsed,
     finished,
     selectedOut,
     history,
@@ -682,6 +684,7 @@ function restoreSavedMatchState(){
   running=!!saved.running;
   elapsed=Math.max(0,Number(saved.elapsed||0));
   half=Number(saved.half||1);
+  half2StartElapsed=Number(saved.half2StartElapsed||0);
   finished=!!saved.finished;
   selectedOut=saved.selectedOut??null;
   history=Array.isArray(saved.history)?saved.history:[];
@@ -730,14 +733,16 @@ function matchDateLabel(){
 
 function msg(t){$("message").textContent=t;setTimeout(()=>$("message").textContent="",2200)}
 function activeSeg(p){return p.segs.length&&p.segs[p.segs.length-1].end===null?p.segs[p.segs.length-1]:null}
+function halfBaseSeconds(){return GAME_SIZE===11?45*60:30*60}
+function matchClock(){return half===1?elapsed:halfBaseSeconds()+Math.max(0,elapsed-half2StartElapsed)}
 function played(p){let n=p.segs.reduce((a,x)=>a+Math.max(0,x.end-x.start),0);const a=activeSeg(p);if(a)n+=Math.max(0,elapsed-a.start);return n}
 function mm(p){const secs=played(p);return secs>0?Math.ceil(secs/60):0}
 function tick(){if(!running)return;const now=performance.now();elapsed+=Math.max(0,(now-last)/1000);last=now}
 function eventIcon(t){return t==='goal'?'⚽':t==='penalty'?'⚽ P':t==='opp'?'🔴⚽':t==='yellow'?'🟨':'🟥'}
-function addEvent(type,p=null,detail=null){events.push({type,name:p?p.name:null,num:p?p.num:null,time:elapsed,detail:detail||null});if(type==='goal'||type==='penalty')scoreUSCM++;if(type==='opp')scoreOpp++;renderEvents()}
-function addSub(out,inn){subEvents.push({out,inn,time:elapsed});renderEvents()}
+function addEvent(type,p=null,detail=null){events.push({type,name:p?p.name:null,num:p?p.num:null,time:matchClock(),elapsedTime:elapsed,detail:detail||null});if(type==='goal'||type==='penalty')scoreUSCM++;if(type==='opp')scoreOpp++;renderEvents()}
+function addSub(out,inn){subEvents.push({out,inn,time:matchClock(),elapsedTime:elapsed});renderEvents()}
 function eventLabel(e){if(e.type==='goal')return 'USCM • '+e.name;if(e.type==='penalty')return 'USCM P • '+e.name;if(e.type==='opp')return 'But adverse';if(e.type==='yellow')return e.name+' • '+(e.detail||'1er carton jaune');return e.name+' • '+(e.detail||'carton rouge')}
-function scoreAt(t){let a=0,b=0;events.filter(e=>e.time<=t).sort((x,y)=>x.time-y.time).forEach(e=>{if(e.type==='goal'||e.type==='penalty')a++;if(e.type==='opp')b++});return isHome?a+' — '+b:b+' — '+a}
+function scoreAt(t){let a=0,b=0;events.filter(e=>(e.elapsedTime??e.time)<=t).sort((x,y)=>(x.elapsedTime??x.time)-(y.elapsedTime??y.time)).forEach(e=>{if(e.type==='goal'||e.type==='penalty')a++;if(e.type==='opp')b++});return isHome?a+' — '+b:b+' — '+a}
 function playerBadges(p){let s='';const goals=events.filter(e=>e.type==='goal'&&e.num===p.num).length,pens=events.filter(e=>e.type==='penalty'&&e.num===p.num).length,y=events.filter(e=>e.type==='yellow'&&e.num===p.num).length,r=events.filter(e=>e.type==='red'&&e.num===p.num).length;if(goals)s+='⚽'+(goals>1?goals:'');if(pens)s+=' ⚽P'+(pens>1?pens:'');if(y)s+=' 🟨'+(y>1?y:'');if(r)s+=' 🟥';return s?'<span class="playerBadges">'+s+'</span>':''}
 
 
@@ -764,7 +769,7 @@ function renderEvents(){
  $('matchEvents').innerHTML=events.length?[...events].reverse().map(e=>'<div class="eventItem"><span>'+eventIcon(e.type)+'</span><span class="evtText">'+esc(eventLabel(e))+'</span><span class="evtTime">'+fmt(e.time)+'</span></div>').join(''):'<div class="eventEmpty">Aucun événement enregistré.</div>';
  renderRecap();
 }
-function renderRecap(){const arr=[];subEvents.forEach(e=>arr.push({time:e.time,type:'Changement',detail:'<span class="out">'+esc(e.out)+'</span> → <span class="in">'+esc(e.inn)+'</span>'}));events.forEach(e=>arr.push({time:e.time,type:e.type==='goal'?'⚽ But USCM':e.type==='penalty'?'⚽ Pénalty':e.type==='opp'?'🔴 But adverse':e.type==='yellow'?'🟨 Carton jaune':'🟥 Carton rouge',detail:esc(eventLabel(e))}));arr.sort((a,b)=>a.time-b.time);$('recapScore').textContent=isHome?'USCM '+scoreUSCM+' — '+scoreOpp+' '+esc(opponentLabel()):esc(opponentLabel())+' '+scoreOpp+' — '+scoreUSCM+' USCM';$('recapMeta').textContent=opponentName.trim()?(opponentLabel()+(matchDateLabel()?' • '+matchDateLabel():'')):(matchDateLabel()?'Date : '+matchDateLabel():'');$('recapGrid').innerHTML='<div class="recapRow recapHead"><div class="recapCell">Temps</div><div class="recapCell">Type</div><div class="recapCell">Détail</div><div class="recapCell">Score</div></div>'+(arr.length?arr.map(e=>'<div class="recapRow"><div class="recapCell">'+fmt(e.time)+'</div><div class="recapCell recapType">'+e.type+'</div><div class="recapCell">'+e.detail+'</div><div class="recapCell">'+scoreAt(e.time)+'</div></div>').join(''):'<div class="recapEmpty" style="grid-column:1/-1">Aucun événement enregistré.</div>');$('recapTimes').innerHTML=[...players].filter(p=>p.selected).sort((a,b)=>{const d=played(b)-played(a);return d||String(a.name||'').trim().localeCompare(String(b.name||'').trim(),'fr',{sensitivity:'base'})}).map(p=>'<div class="finalRow"><div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+(p.gk?' 🧤':'')+playerBadges(p)+'</div><div class="big">'+mm(p) + '′'+'</div></div></div>').join('')}
+function renderRecap(){const arr=[];subEvents.forEach(e=>arr.push({time:e.time,elapsed:e.elapsedTime??e.time,type:'Changement',detail:'<span class="out">'+esc(e.out)+'</span> → <span class="in">'+esc(e.inn)+'</span>'}));events.forEach(e=>arr.push({time:e.time,elapsed:e.elapsedTime??e.time,type:e.type==='goal'?'⚽ But USCM':e.type==='penalty'?'⚽ Pénalty':e.type==='opp'?'🔴 But adverse':e.type==='yellow'?'🟨 Carton jaune':'🟥 Carton rouge',detail:esc(eventLabel(e))}));arr.sort((a,b)=>a.elapsed-b.elapsed);$('recapScore').textContent=isHome?'USCM '+scoreUSCM+' — '+scoreOpp+' '+esc(opponentLabel()):esc(opponentLabel())+' '+scoreOpp+' — '+scoreUSCM+' USCM';$('recapMeta').textContent=opponentName.trim()?(opponentLabel()+(matchDateLabel()?' • '+matchDateLabel():'')):(matchDateLabel()?'Date : '+matchDateLabel():'');$('recapGrid').innerHTML='<div class="recapRow recapHead"><div class="recapCell">Temps</div><div class="recapCell">Type</div><div class="recapCell">Détail</div><div class="recapCell">Score</div></div>'+(arr.length?arr.map(e=>'<div class="recapRow"><div class="recapCell">'+fmt(e.time)+'</div><div class="recapCell recapType">'+e.type+'</div><div class="recapCell">'+e.detail+'</div><div class="recapCell">'+scoreAt(e.elapsed)+'</div></div>').join(''):'<div class="recapEmpty" style="grid-column:1/-1">Aucun événement enregistré.</div>');$('recapTimes').innerHTML=[...players].filter(p=>p.selected).sort((a,b)=>{const d=played(b)-played(a);return d||String(a.name||'').trim().localeCompare(String(b.name||'').trim(),'fr',{sensitivity:'base'})}).map(p=>'<div class="finalRow"><div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+(p.gk?' 🧤':'')+playerBadges(p)+'</div><div class="big">'+mm(p) + '′'+'</div></div></div>').join('')}
 function showRecap(){$('dashboard').classList.add('hidden');$('recapPanel').classList.add('open');renderRecap()}function hideRecap(){$('dashboard').classList.remove('hidden');$('recapPanel').classList.remove('open')}
 function renderList(el,list,onfield){
  el.innerHTML='';
@@ -849,7 +854,7 @@ function enforceGoalkeeperInvariant(){
 }
 function render(){enforceGoalkeeperInvariant();
   persistMatchState();
- $('clock').textContent=fmt(elapsed);$('score').textContent=isHome?scoreUSCM+' — '+scoreOpp:scoreOpp+' — '+scoreUSCM;$('scoreLabel').textContent=isHome?'USCM — '+opponentLabel():opponentLabel()+' — USCM';$('formatPanel').classList.toggle('compactHidden',matchStarted||finished);$('top').classList.toggle('compact',running||finished);$('homeBtn').classList.toggle('primary',isHome);$('awayBtn').classList.toggle('primary',!isHome);$('teamOne').classList.toggle('primary',teamKey==='one');$('team28').classList.toggle('primary',teamKey==='plus28');$('status').textContent=finished?'Match terminé — récapitulatif disponible':running?'Match en cours — mi-temps '+half:(elapsed?'Match en pause — mi-temps '+half:'Prêt — 1re mi-temps');$('finish').disabled=finished;$('half').disabled=finished||!matchStarted||half!==1;$('onCount').textContent=players.filter(p=>p.on).length+' / '+GAME_SIZE;$('benchCount').textContent=players.filter(p=>p.selected&&!p.on).length+' / '+(GAME_SIZE===11?18:14);$('starterHelp').textContent=running?'Pendant le match : SORTIE → ENTRÉE • chrono continu.':'Format '+GAME_SIZE+' — convoquez jusqu’à '+(GAME_SIZE===11?18:14)+' joueuses, puis sélectionnez '+GAME_SIZE+' titulaires. Utilisez CONVOQUER pour chaque joueuse présente. Avant démarrage : corrections possibles.';$('matchDuration').textContent=totalMinutes()+'′ + arrêts';$('liveDuration').textContent='Match '+totalMinutes()+'′ + arrêts';$('rosterInfo').textContent='Contingent : '+teams[teamKey].length+' joueuses • Convoquées : '+players.filter(p=>p.selected).length+' / '+(GAME_SIZE===11?18:14)+' • Gardienne : '+(players.find(p=>p.gk)?.name||'à définir');
+ $('clock').textContent=fmt(matchClock());$('score').textContent=isHome?scoreUSCM+' — '+scoreOpp:scoreOpp+' — '+scoreUSCM;$('scoreLabel').textContent=isHome?'USCM — '+opponentLabel():opponentLabel()+' — USCM';$('formatPanel').classList.toggle('compactHidden',matchStarted||finished);$('top').classList.toggle('compact',running||finished);$('homeBtn').classList.toggle('primary',isHome);$('awayBtn').classList.toggle('primary',!isHome);$('teamOne').classList.toggle('primary',teamKey==='one');$('team28').classList.toggle('primary',teamKey==='plus28');$('status').textContent=finished?'Match terminé — récapitulatif disponible':running?'Match en cours — mi-temps '+half:(elapsed?'Match en pause — mi-temps '+half:'Prêt — 1re mi-temps');$('finish').disabled=finished;$('half').disabled=finished||!matchStarted||half!==1;$('onCount').textContent=players.filter(p=>p.on).length+' / '+GAME_SIZE;$('benchCount').textContent=players.filter(p=>p.selected&&!p.on).length+' / '+(GAME_SIZE===11?18:14);$('starterHelp').textContent=running?'Pendant le match : SORTIE → ENTRÉE • chrono continu.':'Format '+GAME_SIZE+' — convoquez jusqu’à '+(GAME_SIZE===11?18:14)+' joueuses, puis sélectionnez '+GAME_SIZE+' titulaires. Utilisez CONVOQUER pour chaque joueuse présente. Avant démarrage : corrections possibles.';$('matchDuration').textContent=totalMinutes()+'′ + arrêts';$('liveDuration').textContent='Match '+totalMinutes()+'′ + arrêts';$('rosterInfo').textContent='Contingent : '+teams[teamKey].length+' joueuses • Convoquées : '+players.filter(p=>p.selected).length+' / '+(GAME_SIZE===11?18:14)+' • Gardienne : '+(players.find(p=>p.gk)?.name||'à définir');
 if($('opponentName'))$('opponentName').value=opponentName;
 if($('matchDate'))$('matchDate').value=matchDate;
 
@@ -862,7 +867,7 @@ if(!matchStarted){
 }
 renderLeaderboard();renderEvents()}
 function resetMatchState(clearSaved=true){
- running=false;clearInterval(timer);elapsed=0;half=1;selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;players=[];
+ running=false;clearInterval(timer);elapsed=0;half=1;half2StartElapsed=0;selectedOut=null;half2StartElapsed=0;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;players=[];
  opponentName='';matchDate=localDateISO();
  if(clearSaved)clearSavedMatchState();
 }
@@ -894,7 +899,7 @@ function setMode(size){
   GAME_SIZE=size;
   clearSavedMatchState();
   players.forEach(p=>{p.on=false;p.selected=false;p.ejected=false;p.yellows=0;p.segs=[]});
-  selectedOut=null;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;
+  selectedOut=null;half2StartElapsed=0;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;
   syncTeamFormatUI();
   loadMatchRoster();
   render();
@@ -915,6 +920,7 @@ function halfMatch(){
   tick();running=false;clearInterval(timer);
   players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})
  }
+ half2StartElapsed=elapsed;
  half=2;selectedOut=null;render();
 }
 function recordPlayerEvent(num){tick();const p=players.find(x=>x.num===num);if(!p||!running)return;if(pendingEvent==='yellow'){p.yellows++;if(p.yellows===1)addEvent('yellow',p,'1er carton jaune');else if(p.yellows===2){p.ejected=true;const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;addEvent('red',p,'carton rouge — 2e carton jaune');msg(p.name+' reçoit un 2e jaune : rouge automatique, exclusion définitive.')}}else if(pendingEvent==='red'){p.ejected=true;const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;addEvent('red',p,'carton rouge');msg(p.name+' est exclue définitivement. Aucun remplacement.')}else addEvent(pendingEvent,p);pendingEvent=null;$('playerModal').classList.remove('open');render()}
