@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>USCM — Temps de jeu</title>
-<meta name="uscm-build" content="V32-PERSISTANCE-HORS-LIGNE">
+<meta name="uscm-build" content="V34-MOBILE-PERSISTANCE-HORS-LIGNE">
 <link rel="manifest" href="./manifest.webmanifest">
 <meta name="theme-color" content="#f3f5f9">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -212,6 +212,72 @@ button:disabled{opacity:.42}
 
 .preMatchActions{display:flex;gap:4px;flex-wrap:wrap;margin-top:2px}
 .preMatchActions button{flex:1;min-width:72px;min-height:25px;font-size:8px}
+
+/* V34 — interface mobile iPhone : même moteur, présentation tactile dédiée */
+@media (max-width:700px){
+  html,body{width:100%;overflow-x:hidden;-webkit-text-size-adjust:100%;}
+  body{font-size:14px;padding-bottom:env(safe-area-inset-bottom)}
+  .app{width:100%;max-width:none;margin:0;padding:5px}
+  .panel{border-radius:10px;padding:6px}
+  .top{display:grid;grid-template-columns:1fr!important;gap:4px;margin-bottom:5px;position:sticky;top:0;z-index:12;background:var(--bg);padding-bottom:4px}
+  .top>section:first-child{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:8px}
+  .scoreBox{margin:0;order:0;min-width:0}
+  .score{font-size:23px;line-height:1}
+  .scoreLabel{font-size:7px;max-width:145px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .clock{font-size:40px;line-height:.9;text-align:right;order:1}
+  .top>div:last-child{text-align:left!important}
+  #formatPanel{padding:5px}
+  #formatPanel .controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
+  #formatPanel .controls button{min-height:36px;font-size:11px;padding:4px 3px}
+  .controls{gap:4px;margin-top:4px}
+  .controls button{min-height:38px;font-size:11px;padding:5px 7px}
+  .twoCol{grid-template-columns:1fr!important;gap:5px}
+  .players{grid-template-columns:1fr!important;gap:4px}
+  .player{padding:5px;border-radius:9px}
+  .player .row{gap:7px}
+  .num{width:29px;height:29px;font-size:13px;border-radius:8px}
+  .name{font-size:13px}
+  .time{font-size:16px}
+  .player button{min-height:34px;font-size:11px;margin-top:4px!important}
+  .preMatchActions{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+  .preMatchActions button:only-child{grid-column:1/-1}
+  .sectionTitle{margin-bottom:4px}
+  .sectionTitle h2{font-size:13px}
+  .count{font-size:9px}
+  .notice{font-size:9px}
+  .balanceBody{grid-template-columns:1fr!important;gap:4px}
+  #leaderboard{padding:4px}
+  .lbGrid{grid-template-columns:1fr!important;grid-auto-flow:row!important;grid-template-rows:none!important;gap:3px}
+  .lbItem{min-height:31px;padding:4px 7px}
+  .lbName{font-size:12px}
+  .lbTime{font-size:15px}
+  .eventLayout{grid-template-columns:1fr!important;gap:5px}
+  .events{padding:5px}
+  .eventButtons{grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
+  .eventBtn{min-height:42px;font-size:18px;padding:3px}
+  .eventList{grid-template-columns:1fr!important;max-height:190px;overflow-y:auto;gap:3px}
+  #subEvents.eventList{grid-template-columns:1fr!important}
+  .eventItem{min-height:28px;padding:4px 6px;font-size:10px}
+  .eventItem .evtTime{font-size:9px}
+  .finalGrid{grid-template-columns:1fr!important;gap:4px}
+  .finalRow{padding:5px}
+  .finalRow .big{font-size:16px}
+  .recapGrid{grid-template-columns:45px 78px minmax(0,1fr) 50px;font-size:9px}
+  .recapCell{padding:4px 3px}
+  .modal{padding:8px}
+  .modalCard{width:100%;max-height:90vh;overflow:auto;padding:7px}
+  .modalGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+  .modalGrid button{min-height:42px;font-size:12px}
+  #message{font-size:10px;min-height:13px}
+  /* Touch target enlargement without changing the desktop layout. */
+  button{min-width:44px}
+}
+@media (max-width:380px){
+  .clock{font-size:35px}
+  .score{font-size:21px}
+  .eventButtons{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .recapGrid{grid-template-columns:42px 72px minmax(0,1fr) 46px;font-size:8px}
+}
 </style>
 </head>
 <body>
