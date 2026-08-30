@@ -279,6 +279,155 @@ button:disabled{opacity:.42}
   .recapGrid{grid-template-columns:42px 72px minmax(0,1fr) 46px;font-size:8px}
 }
 </style>
+
+<style id="v34-phone-layout">
+@media (max-width: 600px){
+  html,body{overflow-x:hidden!important}
+  body{padding:6px!important;font-size:14px!important}
+  .app{max-width:100%!important;width:100%!important;margin:0!important}
+  .card{border-radius:12px!important;padding:8px!important}
+
+  /* Header: turn the desktop 2-column header into a clean vertical phone layout */
+  .top{
+    display:flex!important;
+    flex-direction:column!important;
+    gap:8px!important;
+    min-height:0!important;
+    padding:10px!important;
+  }
+  .topLeft,.topRight{width:100%!important;min-width:0!important;position:static!important}
+  .brand{font-size:11px!important;line-height:1.1!important}
+  .scoreRow{
+    display:grid!important;
+    grid-template-columns:minmax(72px,auto) 1fr!important;
+    grid-template-areas:
+      "score clock"
+      "status status"!important;
+    align-items:center!important;
+    gap:4px 10px!important;
+    margin-top:5px!important;
+  }
+  .scoreBox{grid-area:score!important;min-width:0!important}
+  .clock{grid-area:clock!important;font-size:46px!important;line-height:1!important;text-align:right!important;white-space:nowrap!important}
+  .status{grid-area:status!important;max-width:none!important;font-size:12px!important;line-height:1.25!important}
+  .score{font-size:34px!important;line-height:1!important}
+  .scoreLabel{font-size:9px!important}
+
+  /* Main match actions: horizontal wrapping instead of vertical overlap */
+  .controls{
+    display:grid!important;
+    grid-template-columns:repeat(4,minmax(0,1fr))!important;
+    gap:6px!important;
+    margin-top:8px!important;
+    width:100%!important;
+  }
+  .controls button{
+    min-width:0!important;
+    width:100%!important;
+    padding:9px 3px!important;
+    font-size:12px!important;
+    line-height:1.05!important;
+    white-space:normal!important;
+    min-height:44px!important;
+  }
+  .controls button:nth-child(n+5){grid-column:span 2!important}
+
+  /* Objective panel no longer floats over the header */
+  .objective,.objectives,.goalBox,.topRight{
+    position:static!important;
+    transform:none!important;
+    text-align:left!important;
+  }
+  .topRight{
+    display:grid!important;
+    grid-template-columns:repeat(3,minmax(0,1fr))!important;
+    gap:5px!important;
+    border-top:1px solid #dbe2ec!important;
+    padding-top:7px!important;
+  }
+  .topRight>*{min-width:0!important}
+  .topRight .big,.topRight strong{font-size:15px!important}
+
+  /* Setup panel */
+  .setup,.settings,.matchSetup{
+    display:block!important;
+    width:100%!important;
+  }
+  .teamButtons,.formatButtons,.placeButtons{
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:6px!important;
+  }
+  .formatButtons{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  .teamButtons button,.formatButtons button,.placeButtons button{
+    width:100%!important;min-height:44px!important;font-size:13px!important;padding:8px 4px!important
+  }
+  input,select{font-size:16px!important;max-width:100%!important}
+  .setupGrid,.metaGrid{
+    grid-template-columns:1fr!important;
+    gap:7px!important;
+  }
+
+  /* Time balance: one readable column */
+  .balanceGrid,.timeGrid,.playersTime,.timeList{
+    grid-template-columns:1fr!important;
+    gap:3px!important;
+  }
+
+  /* Events and changes stack vertically */
+  .midGrid,.eventsGrid,.logsGrid{
+    grid-template-columns:1fr!important;
+    gap:7px!important;
+  }
+  .eventButtons{
+    display:grid!important;
+    grid-template-columns:repeat(3,minmax(0,1fr))!important;
+    gap:5px!important;
+  }
+  .eventButtons button{min-height:44px!important;font-size:13px!important}
+
+  /* Pitch and bench cards: phone-friendly single column */
+  .playersWrap,.pitchBench,.zones{
+    grid-template-columns:1fr!important;
+    display:grid!important;
+    gap:8px!important;
+  }
+  .playerGrid,.rosterGrid,.benchGrid,.fieldGrid{
+    grid-template-columns:1fr!important;
+    gap:5px!important;
+  }
+  .playerCard,.player{
+    min-width:0!important;
+    width:100%!important;
+    padding:8px!important;
+  }
+  .playerCard button,.player button{min-height:42px!important}
+
+  /* Modal/roster */
+  .modal,.modalCard,.dialog{
+    max-width:calc(100vw - 16px)!important;
+    width:calc(100vw - 16px)!important;
+    max-height:90vh!important;
+  }
+
+  /* Recap */
+  .recapTable{font-size:11px!important}
+  .recapTable th,.recapTable td{padding:5px 3px!important}
+  .recapTable th:nth-child(1),.recapTable td:nth-child(1){width:46px!important}
+  .finalGrid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+
+  h1,h2,h3{line-height:1.1!important}
+}
+
+/* Very narrow phones */
+@media (max-width: 390px){
+  .clock{font-size:40px!important}
+  .controls{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  .controls button:nth-child(n){grid-column:auto!important}
+  .eventButtons{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+}
+</style>
+
 </head>
 <body>
 <div class="app">
