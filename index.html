@@ -382,6 +382,8 @@ button:disabled{opacity:.42}
   #formatPanel>.row{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:8px!important}
   #formatPanel>.row>div{min-width:0!important}
   #formatPanel #onCount,#formatPanel #benchCount,#formatPanel #matchDuration{font-size:18px!important;white-space:nowrap!important}
+  #syncPanel .matchMeta{grid-template-columns:1fr!important}
+  #syncPanel .matchMeta button{width:100%!important;min-height:44px!important}
 
   /* All lower sections stay inside the viewport width. */
   #dashboard,.dashboard{width:100%!important;max-width:none!important}
@@ -452,6 +454,16 @@ button:disabled{opacity:.42}
 <div class="notice">La mi-temps est manuelle : le chrono continue pendant les arrêts de jeu.</div>
 </section>
 </div>
+<section id="syncPanel" class="panel" style="margin-top:7px">
+  <div class="sectionTitle"><h2>☁️ Synchronisation iPad ↔ iPhone</h2><div id="syncStatus" class="count">Local uniquement</div></div>
+  <div class="notice">Crée un match partagé sur un appareil, puis utilise le même code sur l'autre. Les deux appareils peuvent ensuite modifier le même match.</div>
+  <div class="matchMeta" style="display:grid;grid-template-columns:1fr auto auto;gap:5px;margin-top:6px;align-items:end">
+    <div><div class="label">Code du match partagé</div><input id="syncCode" type="text" maxlength="12" placeholder="ex. USCM-8F42" autocomplete="off" autocapitalize="characters" spellcheck="false"></div>
+    <button type="button" id="createSync" class="primary">☁️ Créer</button>
+    <button type="button" id="joinSync">↗ Rejoindre</button>
+  </div>
+  <div id="syncInfo" class="count" style="margin-top:5px"></div>
+</section>
 <div id="dashboard" class="dashboard">
 <section id="balancePanel" class="panel">
 <div class="sectionTitle"><h2>🎯 Équilibre du temps de jeu</h2><div class="count">Minimum 30′ • n°1 = 60′</div></div>
@@ -528,6 +540,31 @@ button:disabled{opacity:.42}
 <button type="button" class="modalCancel" id="modalCancel">Annuler</button>
 </div>
 </div>
+<script defer src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/12.18.0/firebase-database-compat.js"></script>
+<script>
+window.addEventListener('DOMContentLoaded',()=>{
+  const cfg={
+    apiKey:"AIzaSyCYFORq2sHCq6Ww_XdsTrynDw6YzxaBkYA",
+    authDomain:"uscm---gestion-temps-de-jeu.firebaseapp.com",
+    databaseURL:"https://uscm---gestion-temps-de-jeu-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:"uscm---gestion-temps-de-jeu",
+    storageBucket:"uscm---gestion-temps-de-jeu.firebasestorage.app",
+    messagingSenderId:"501073446390",
+    appId:"1:501073446390:web:f7e54b775ef21fcc2973d7"
+  };
+  try{
+    const app=firebase.initializeApp(cfg);
+    window.USCM_FIREBASE={app,auth:firebase.auth(),db:firebase.database(),ready:true};
+    window.USCM_FIREBASE.auth.signInAnonymously().catch(()=>{});
+    window.dispatchEvent(new Event('uscm-firebase-ready'));
+  }catch(e){
+    window.USCM_FIREBASE={ready:false,error:e};
+    window.dispatchEvent(new Event('uscm-firebase-ready'));
+  }
+});
+</script>
 <script>
 (()=>{
 const DEFAULT_TEAMS={
@@ -599,6 +636,121 @@ const MATCH_STATE_PREFIX='uscm_temps_de_jeu_match_v1_';
 let half2StartElapsed=0;
 let saveMatchTimer=null;
 let restoredMatchState=false;
+let syncCode='';
+let syncRef=null;
+let syncListening=false;
+let cloudApplying=false;
+let cloudTimer=null;
+let firebaseReady=false;
+let firebaseAuthUser=null;
+let lastCloudSyncAt=0;
+const SYNC_CODE_KEY='uscm_temps_de_jeu_sync_code_v1';
+
+function randomSyncCode(){
+  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let x='USCM-';
+  for(let i=0;i<4;i++)x+=chars[Math.floor(Math.random()*chars.length)];
+  return x;
+}
+function normalizeSyncCode(v){return String(v||'').trim().toUpperCase().replace(/[^A-Z0-9-]/g,'').slice(0,12)}
+function setSyncStatus(text,ok=false){
+  const el=$('syncStatus'); if(el){el.textContent=text;el.style.color=ok?'#087443':'';}
+}
+function cloudPayload(){
+  const x=serializeMatchState();
+  // When the match is running, keep the latest measured elapsed time but do not
+  // attempt to mirror the 500 ms local timer tick. Each client computes the clock.
+  x.syncCode=syncCode;
+  x.clientId=localStorage.getItem('uscm_sync_client_id')||'';
+  return x;
+}
+function queueCloudSync(immediate=false){
+  if(cloudApplying||!syncRef||!firebaseReady)return;
+  const now=Date.now();
+  if(!immediate && running && now-lastCloudSyncAt<3000)return;
+  if(cloudTimer){clearTimeout(cloudTimer);cloudTimer=null}
+  const write=()=>{cloudTimer=null;lastCloudSyncAt=Date.now();try{syncRef.set(cloudPayload()).then(()=>setSyncStatus('☁️ Synchronisé',true)).catch(()=>setSyncStatus('⚠️ Hors ligne / en attente'));}catch(e){setSyncStatus('⚠️ Synchronisation indisponible')}};
+  if(immediate)write(); else cloudTimer=setTimeout(write,900);
+}
+function applyCloudState(saved){
+  if(!saved||saved.version!==1)return false;
+  cloudApplying=true;
+  try{
+    GAME_SIZE=teamKey==='one'?11:Number(saved.GAME_SIZE||7);
+    matchStarted=!!saved.matchStarted; running=!!saved.running;
+    elapsed=Math.max(0,Number(saved.elapsed||0)); half=Number(saved.half||1);
+    half2StartElapsed=Number(saved.half2StartElapsed||0); finished=!!saved.finished;
+    selectedOut=saved.selectedOut??null; history=Array.isArray(saved.history)?saved.history:[];
+    events=Array.isArray(saved.events)?saved.events:[]; subEvents=Array.isArray(saved.subEvents)?saved.subEvents:[];
+    pendingEvent=saved.pendingEvent??null; scoreUSCM=Number(saved.scoreUSCM||0); scoreOpp=Number(saved.scoreOpp||0);
+    isHome=saved.isHome!==false; opponentName=String(saved.opponentName||''); matchDate=String(saved.matchDate||localDateISO()); gkNum=saved.gkNum??null;
+    players=mergeRosterWithSaved(saved.players); matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
+    clearInterval(timer);
+    if(running){last=performance.now();timer=setInterval(()=>{tick();render()},500)}
+    persistMatchState(true);
+    syncCode=normalizeSyncCode(saved.syncCode||syncCode);
+    if($('syncCode'))$('syncCode').value=syncCode;
+    syncTeamFormatUI(); render();
+    setSyncStatus('☁️ Synchronisé',true);
+    return true;
+  }finally{cloudApplying=false}
+}
+function attachSync(code,createIfMissing=false){
+  code=normalizeSyncCode(code);
+  if(!code){msg('Saisis un code de match partagé.');return}
+  if(!firebaseReady||!window.USCM_FIREBASE?.db){msg('Firebase n’est pas encore prêt.');return}
+  if(!firebaseAuthUser){
+    setSyncStatus('☁️ Authentification…');
+    window.USCM_FIREBASE.auth.signInAnonymously().then(()=>attachSync(code,createIfMissing)).catch(()=>{setSyncStatus('⚠️ Authentification impossible');msg('Impossible de se connecter à Firebase.')});
+    return;
+  }
+  if(syncRef){try{syncRef.off()}catch(e){}}
+  syncCode=code;
+  try{localStorage.setItem(SYNC_CODE_KEY,syncCode)}catch(e){}
+  if($('syncCode'))$('syncCode').value=syncCode;
+  syncRef=window.USCM_FIREBASE.db.ref('matches/'+syncCode);
+  syncListening=true;
+  setSyncStatus('☁️ Connexion…');
+  syncRef.on('value',snap=>{
+    if(cloudApplying)return;
+    const data=snap.val();
+    if(data){
+      if(data.teamKey && data.teamKey!==teamKey){msg('Ce code est déjà utilisé pour l’autre équipe.');return}
+      applyCloudState(data);
+    }else if(createIfMissing){
+      queueCloudSync(true);
+      setSyncStatus('☁️ Match partagé créé',true);
+    }
+  },()=>setSyncStatus('⚠️ Connexion Firebase impossible'));
+}
+function initSyncUI(){
+  const cid=localStorage.getItem('uscm_sync_client_id')||('c_'+Math.random().toString(36).slice(2)+Date.now().toString(36));
+  try{localStorage.setItem('uscm_sync_client_id',cid)}catch(e){}
+  const savedCode=localStorage.getItem(SYNC_CODE_KEY)||'';
+  if($('syncCode'))$('syncCode').value=savedCode;
+  $('createSync').onclick=()=>{
+    const c=randomSyncCode();
+    if($('syncCode'))$('syncCode').value=c;
+    attachSync(c,true);
+    $('syncInfo').textContent='Code à saisir sur le deuxième appareil : '+c;
+  };
+  $('joinSync').onclick=()=>{
+    const c=normalizeSyncCode($('syncCode').value);
+    if(!c){msg('Saisis le code du match.');return}
+    attachSync(c,false);
+    $('syncInfo').textContent='Match partagé : '+c;
+  };
+  const activateFirebase=()=>{
+    firebaseReady=!!window.USCM_FIREBASE?.ready;
+    if(!firebaseReady){setSyncStatus('⚠️ Firebase indisponible');return}
+    window.USCM_FIREBASE.auth.onAuthStateChanged(u=>{
+      firebaseAuthUser=u||null;
+      if(u){setSyncStatus('☁️ Connecté — local'); if(savedCode)attachSync(savedCode,false)}
+    });
+  };
+  if(window.USCM_FIREBASE?.ready)activateFirebase();
+  else window.addEventListener('uscm-firebase-ready',activateFirebase,{once:true});
+}
 
 function matchStateKey(k=teamKey){return MATCH_STATE_PREFIX+k}
 
@@ -637,6 +789,7 @@ function persistMatchState(immediate=false){
   if(saveMatchTimer){clearTimeout(saveMatchTimer);saveMatchTimer=null}
   const write=()=>{
     try{localStorage.setItem(matchStateKey(),JSON.stringify(serializeMatchState()))}catch(e){}
+    queueCloudSync(false);
   };
   if(immediate) write();
   else saveMatchTimer=setTimeout(()=>{saveMatchTimer=null;write()},250);
@@ -974,6 +1127,7 @@ function finishMatch(){
 // Enhance roster modal with a match-only add option.
 $('manageRoster').insertAdjacentHTML('afterend','<button type="button" id="addMatchOnly" class="venueBtn">➕ Pour ce match</button>');$('addMatchOnly').onclick=addMatchPlayer;
 teamKey="one"; GAME_SIZE=11;
+initSyncUI();
 if(!restoreSavedMatchState()){
   matchDate=localDateISO();
   syncTeamFormatUI();
