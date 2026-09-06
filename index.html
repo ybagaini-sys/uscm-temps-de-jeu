@@ -1140,15 +1140,60 @@ function resetCurrentTeamToBase(){
   msg('Contingent de base restauré pour '+(teamKey==='one'?'La Une féminine':'Femmes 28+')+'.');
 }
 function openRoster(){if(matchStarted||running){msg('Le contingent ne peut être modifié après le début du match.');return}renderRosterModal();$('rosterModal').classList.add('open')}
+function syncPlayersAfterPermanentRosterChange(){
+ const roster=normalizeRoster(teams[teamKey]);
+ const oldPermanent=new Set((matchRoster||[]).map(p=>String(p.num)+'|'+String(p.name)));
+ const tempPlayers=players.filter(p=>!oldPermanent.has(String(p.num)+'|'+String(p.name)));
+ const byKey=new Map(players.map(p=>[String(p.num)+'|'+String(p.name),p]));
+ const synced=roster.map(([num,name])=>{
+   const key=String(num)+'|'+String(name);
+   const p=byKey.get(key);
+   if(p)return p;
+   return {num:String(num),name:String(name),gk:false,on:false,selected:false,ejected:false,yellows:0,segs:[]};
+ });
+ players=[...synced,...tempPlayers];
+ matchRoster=roster.map(p=>({num:String(p[0]),name:String(p[1])}));
+}
 function renderRosterModal(){
- const t=normalizeRoster(teams[teamKey]);
+ const t=normalizeRoster(teams[teamKey]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]),undefined,{numeric:true,sensitivity:'base'}));
  $('rosterModalInfo').textContent=(teamKey==='one'?'La Une féminine':'Femmes 28+')+' • '+t.length+' joueuses. N° et prénoms réels affichés ci-dessous. Les modifications définitives sont conservées après actualisation. Le contingent de base peut être restauré.';
  $('rosterRows').innerHTML='<div class="rosterHead"><div>N°</div><div>Prénom</div><div>Modifier</div><div></div></div>'+
  t.map((p,i)=>'<div class="player rosterRow" style="margin-top:3px"><div class="row"><div class="num">'+esc(p[0]||'—')+'</div><div class="name">'+esc(p[1])+'</div><button type="button" data-edit="'+i+'" style="min-height:26px">✏️ Modifier</button><button type="button" data-del="'+i+'" aria-label="Supprimer" title="Supprimer" style="min-height:26px">🗑️</button></div></div>').join('');
-$('rosterRows').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editRoster(+b.dataset.edit));$('rosterRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteRoster(+b.dataset.del))}$('rosterRows').parentElement.querySelector('#rosterResetArea')?.remove();$('rosterRows').insertAdjacentHTML('afterend','<div id="rosterResetArea" style="display:flex;gap:4px;margin-top:5px"><button type="button" id="resetCurrentRoster" style="min-height:27px;font-size:9px">↺ Restaurer le contingent de base</button></div>');$('resetCurrentRoster').onclick=()=>{if(confirm('Restaurer le contingent de base de cette équipe ? Les modifications permanentes de cette équipe seront perdues.'))resetCurrentTeamToBase();renderRosterModal()}
-function editRoster(i){const p=teams[teamKey][i];const name=prompt('Prénom de la joueuse',p[1]);if(name===null)return;if(!name.trim()){msg('Le prénom est obligatoire.');return}const num=prompt('Nouveau numéro de maillot',p[0]||'');if(num===null||!num.trim())return;const scope=prompt('Modification du numéro :\nD = définitive (contingent)\nP = provisoire (ce match uniquement)','D');if(scope===null)return;const mode=scope.trim().toUpperCase();if(mode!=='D'&&mode!=='P'){msg('Choisis D pour définitive ou P pour provisoire.');return}if(mode==='D'){if(teams[teamKey].some((x,j)=>j!==i&&x[0]===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}teams[teamKey][i]=[num.trim(),name.trim()];saveTeams()}else{const oldNum=p[0],cur=players.find(x=>x.num===oldNum&&x.name===p[1]);if(cur){if(players.some(x=>x!==cur&&x.num===num.trim())){msg('Ce numéro existe déjà pour ce match.');return}cur.num=num.trim();cur.name=name.trim()}else{msg('La modification provisoire s’appliquera au prochain chargement du match.');}}renderRosterModal();render()}
-function deleteRoster(i){const p=teams[teamKey][i];if(!confirm('Supprimer définitivement '+p[1]+' du contingent ?'))return;teams[teamKey].splice(i,1);saveTeams();renderRosterModal();render()}
-function addRoster(){const name=prompt('Prénom de la nouvelle joueuse');if(name===null)return;const num=prompt('Numéro de maillot permanent');if(num===null)return;if(!name.trim()||!num.trim()){msg('Le prénom et le numéro sont obligatoires.');return}if(teams[teamKey].some(p=>p[0]===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}teams[teamKey].push([num.trim(),name.trim()]);saveTeams();renderRosterModal();render()}
+ $('rosterRows').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editRoster(+b.dataset.edit));$('rosterRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteRoster(+b.dataset.del));
+ $('rosterRows').parentElement.querySelector('#rosterResetArea')?.remove();$('rosterRows').insertAdjacentHTML('afterend','<div id="rosterResetArea" style="display:flex;gap:4px;margin-top:5px"><button type="button" id="resetCurrentRoster" style="min-height:27px;font-size:9px">↺ Restaurer le contingent de base</button></div>');$('resetCurrentRoster').onclick=()=>{if(confirm('Restaurer le contingent de base de cette équipe ? Les modifications permanentes de cette équipe seront perdues.'))resetCurrentTeamToBase();renderRosterModal()}
+}
+function editRoster(i){
+ const p=teams[teamKey][i],oldNum=String(p[0]),oldName=String(p[1]);
+ const name=prompt('Prénom de la joueuse',p[1]);if(name===null)return;if(!name.trim()){msg('Le prénom est obligatoire.');return}
+ const num=prompt('Nouveau numéro de maillot',p[0]||'');if(num===null||!num.trim())return;
+ const scope=prompt('Modification du numéro :\nD = définitive (contingent)\nP = provisoire (ce match uniquement)','D');if(scope===null)return;
+ const mode=scope.trim().toUpperCase();if(mode!=='D'&&mode!=='P'){msg('Choisis D pour définitive ou P pour provisoire.');return}
+ if(mode==='D'){
+   const newNum=num.trim(),newName=name.trim();
+   if(teams[teamKey].some((x,j)=>j!==i&&x[0]===newNum)){msg('Ce numéro existe déjà dans ce contingent.');return}
+   teams[teamKey][i]=[newNum,newName];
+   const cur=players.find(x=>String(x.num)===oldNum&&String(x.name)===oldName);
+   if(cur){cur.num=newNum;cur.name=newName}
+   saveTeams();
+   syncPlayersAfterPermanentRosterChange();
+ }else{
+   const oldKey=oldNum+'|'+oldName,cur=players.find(x=>String(x.num)+'|'+String(x.name)===oldKey);
+   if(cur){if(players.some(x=>x!==cur&&String(x.num)===num.trim())){msg('Ce numéro existe déjà pour ce match.');return}cur.num=num.trim();cur.name=name.trim()}
+   else{msg('La modification provisoire s’appliquera au prochain chargement du match.');}
+ }
+ renderRosterModal();render();
+}
+function deleteRoster(i){
+ const p=teams[teamKey][i];if(!confirm('Supprimer définitivement '+p[1]+' du contingent ?'))return;
+ teams[teamKey].splice(i,1);saveTeams();
+ const idx=players.findIndex(x=>String(x.num)===String(p[0])&&String(x.name)===String(p[1]));if(idx>=0)players.splice(idx,1);
+ syncPlayersAfterPermanentRosterChange();renderRosterModal();render();
+}
+function addRoster(){
+ const name=prompt('Prénom de la nouvelle joueuse');if(name===null)return;const num=prompt('Numéro de maillot permanent');if(num===null)return;if(!name.trim()||!num.trim()){msg('Le prénom et le numéro sont obligatoires.');return}
+ if(teams[teamKey].some(p=>p[0]===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}
+ teams[teamKey].push([num.trim(),name.trim()]);saveTeams();syncPlayersAfterPermanentRosterChange();renderRosterModal();render();
+}
 // Temporary match-only player and temporary jersey change.
 function addMatchPlayer(){if(matchStarted||running){msg('Impossible après le début du match.');return}const name=prompt('Prénom de la joueuse ajoutée pour ce match uniquement');if(name===null||!name.trim())return;const num=prompt('Numéro de maillot pour ce match');if(num===null||!num.trim())return;if(players.some(p=>p.num===num.trim())){msg('Ce numéro est déjà utilisé pour ce match.');return}const max=GAME_SIZE===11?18:14;players.push({num:num.trim(),name:name.trim(),gk:false,on:false,selected:players.filter(p=>p.selected).length<max,ejected:false,yellows:0,segs:[]});render()}
 function startNew(){if(!confirm('Réinitialiser le match ? Le contingent permanent ne sera pas modifié.'))return;resetMatchState(true);loadMatchRoster();render()}
