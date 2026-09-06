@@ -595,6 +595,16 @@ function cloneTeams(x){return JSON.parse(JSON.stringify(x))}
 function normalizeRoster(arr){
  return (Array.isArray(arr)?arr:[]).filter(x=>Array.isArray(x)&&x.length>=2&&String(x[1]).trim()).map(x=>[String(x[0]??'').trim(),String(x[1]).trim()]);
 }
+function sortRosterByNumber(arr){
+  return normalizeRoster(arr).sort((a,b)=>{
+    const na=Number(a[0]), nb=Number(b[0]);
+    const va=Number.isFinite(na), vb=Number.isFinite(nb);
+    if(va&&vb) return na-nb;
+    if(va) return -1;
+    if(vb) return 1;
+    return String(a[0]).localeCompare(String(b[0]),'fr',{numeric:true,sensitivity:'base'});
+  });
+}
 function validTeams(x){return !!(x&&validRoster(x.one)&&validRoster(x.plus28))}
 function getBaseTeams(){
   try{
@@ -616,7 +626,9 @@ function loadTeams(){
       let fixed=cloneTeams(saved), changed=false;
       if(!looksLikeUne(fixed.one)){ fixed.one=cloneTeams(base.one); changed=true; }
       if(!looksLike28(fixed.plus28)){ fixed.plus28=cloneTeams(base.plus28); changed=true; }
-      if(changed)try{localStorage.setItem(STORAGE,JSON.stringify(fixed))}catch(e){}
+      fixed.one=sortRosterByNumber(fixed.one);
+      fixed.plus28=sortRosterByNumber(fixed.plus28);
+      try{localStorage.setItem(STORAGE,JSON.stringify(fixed))}catch(e){}
       return fixed;
     }
   }catch(e){}
@@ -625,9 +637,13 @@ function loadTeams(){
   return fresh;
 }
 let teams=loadTeams(),teamKey='one';
-function saveTeams(){localStorage.setItem(STORAGE,JSON.stringify(teams))}
+function saveTeams(){
+  teams.one=sortRosterByNumber(teams.one);
+  teams.plus28=sortRosterByNumber(teams.plus28);
+  localStorage.setItem(STORAGE,JSON.stringify(teams));
+}
 function getTeamRoster(){
-  return JSON.parse(JSON.stringify(teams[teamKey]||[]));
+  return sortRosterByNumber(teams[teamKey]||[]);
 }
 
 const $=id=>document.getElementById(id);
@@ -1155,7 +1171,7 @@ function syncPlayersAfterPermanentRosterChange(){
  matchRoster=roster.map(p=>({num:String(p[0]),name:String(p[1])}));
 }
 function renderRosterModal(){
- const t=normalizeRoster(teams[teamKey]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]),undefined,{numeric:true,sensitivity:'base'}));
+ const t=sortRosterByNumber(teams[teamKey]);
  $('rosterModalInfo').textContent=(teamKey==='one'?'La Une féminine':'Femmes 28+')+' • '+t.length+' joueuses. N° et prénoms réels affichés ci-dessous. Les modifications définitives sont conservées après actualisation. Le contingent de base peut être restauré.';
  $('rosterRows').innerHTML='<div class="rosterHead"><div>N°</div><div>Prénom</div><div>Modifier</div><div></div></div>'+
  t.map((p,i)=>'<div class="player rosterRow" style="margin-top:3px"><div class="row"><div class="num">'+esc(p[0]||'—')+'</div><div class="name">'+esc(p[1])+'</div><button type="button" data-edit="'+i+'" style="min-height:26px">✏️ Modifier</button><button type="button" data-del="'+i+'" aria-label="Supprimer" title="Supprimer" style="min-height:26px">🗑️</button></div></div>').join('');
