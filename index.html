@@ -644,6 +644,7 @@ let cloudTimer=null;
 let firebaseReady=false;
 let firebaseAuthUser=null;
 let lastCloudSyncAt=0;
+let lastCloudState=null; // V35.2: differential Firebase writes; never overwrite a shared match with a stale full snapshot
 const SYNC_CODE_KEY='uscm_temps_de_jeu_sync_code_v1';
 
 function randomSyncCode(){
@@ -658,19 +659,49 @@ function setSyncStatus(text,ok=false){
 }
 function cloudPayload(){
   const x=serializeMatchState();
-  // When the match is running, keep the latest measured elapsed time but do not
-  // attempt to mirror the 500 ms local timer tick. Each client computes the clock.
   x.syncCode=syncCode;
   x.clientId=localStorage.getItem('uscm_sync_client_id')||'';
   return x;
 }
+function cloneCloud(x){return x==null?null:JSON.parse(JSON.stringify(x))}
 function queueCloudSync(immediate=false){
   if(cloudApplying||!syncRef||!firebaseReady)return;
-  const now=Date.now();
-  if(!immediate && running && now-lastCloudSyncAt<3000)return;
   if(cloudTimer){clearTimeout(cloudTimer);cloudTimer=null}
-  const write=()=>{cloudTimer=null;lastCloudSyncAt=Date.now();try{syncRef.set(cloudPayload()).then(()=>setSyncStatus('☁️ Synchronisé',true)).catch(()=>setSyncStatus('⚠️ Hors ligne / en attente'));}catch(e){setSyncStatus('⚠️ Synchronisation indisponible')}};
-  if(immediate)write(); else cloudTimer=setTimeout(write,900);
+  const write=()=>{
+    cloudTimer=null;
+    const current=cloudPayload();
+    // First write is only for a newly-created room. After that, NEVER replace
+    // the whole match with set(): that would let a stale second device undo a
+    // newer action (e.g. CONVOQUER). We send only fields that actually changed.
+    if(!lastCloudState){
+      lastCloudState=cloneCloud(current);
+      lastCloudSyncAt=Date.now();
+      syncRef.set(current).then(()=>setSyncStatus('☁️ Synchronisé',true)).catch(()=>{
+        lastCloudState=null;setSyncStatus('⚠️ Hors ligne / en attente')
+      });
+      return;
+    }
+    const updates={};
+    const keys=['GAME_SIZE','matchStarted','running','elapsed','half','half2StartElapsed','finished','selectedOut','history','events','subEvents','pendingEvent','scoreUSCM','scoreOpp','isHome','opponentName','matchDate','gkNum'];
+    keys.forEach(k=>{
+      if(JSON.stringify(current[k])!==JSON.stringify(lastCloudState[k])) updates[k]=current[k];
+    });
+    const oldPlayers=Array.isArray(lastCloudState.players)?lastCloudState.players:[];
+    const newPlayers=Array.isArray(current.players)?current.players:[];
+    const n=Math.max(oldPlayers.length,newPlayers.length);
+    for(let i=0;i<n;i++){
+      if(JSON.stringify(newPlayers[i])!==JSON.stringify(oldPlayers[i])) updates['players/'+i]=newPlayers[i]===undefined?null:newPlayers[i];
+    }
+    if(Object.keys(updates).length===0)return;
+    lastCloudSyncAt=Date.now();
+    syncRef.update(updates).then(()=>{
+      // Keep the complete local baseline so the next render only sends the
+      // next real mutation, never an old snapshot from the other device.
+      lastCloudState=cloneCloud(current);
+      setSyncStatus('☁️ Synchronisé',true);
+    }).catch(()=>setSyncStatus('⚠️ Hors ligne / en attente'));
+  };
+  if(immediate)write(); else cloudTimer=setTimeout(write,250);
 }
 function applyCloudState(saved){
   if(!saved||saved.version!==1)return false;
@@ -687,8 +718,9 @@ function applyCloudState(saved){
     players=mergeRosterWithSaved(saved.players); matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
     clearInterval(timer);
     if(running){last=performance.now();timer=setInterval(()=>{tick();render()},500)}
-    persistMatchState(true);
     syncCode=normalizeSyncCode(saved.syncCode||syncCode);
+    lastCloudState=cloneCloud(saved);
+    try{localStorage.setItem(matchStateKey(),JSON.stringify(serializeMatchState()))}catch(e){}
     if($('syncCode'))$('syncCode').value=syncCode;
     syncTeamFormatUI(); render();
     setSyncStatus('☁️ Synchronisé',true);
@@ -718,6 +750,7 @@ function attachSync(code,createIfMissing=false){
       if(data.teamKey && data.teamKey!==teamKey){msg('Ce code est déjà utilisé pour l’autre équipe.');return}
       applyCloudState(data);
     }else if(createIfMissing){
+      lastCloudState=null;
       queueCloudSync(true);
       setSyncStatus('☁️ Match partagé créé',true);
     }
