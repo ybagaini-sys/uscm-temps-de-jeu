@@ -631,6 +631,8 @@ function getTeamRoster(){
 const $=id=>document.getElementById(id);
 const DURATIONS={7:60,9:60,11:90};
 let GAME_SIZE=7,matchStarted=false,running=false,last=0,elapsed=0,half=1,timer=null,finished=false,selectedOut=null,history=[],events=[],subEvents=[],pendingEvent=null,scoreUSCM=0,scoreOpp=0,isHome=true,opponentName='',matchDate='';
+let runningSinceWallMs=0;
+let serverTimeOffset=0;
 let matchRoster=[],players=[],gkNum=null;
 const MATCH_STATE_PREFIX='uscm_temps_de_jeu_match_v1_';
 let half2StartElapsed=0;
@@ -682,7 +684,7 @@ function queueCloudSync(immediate=false){
       return;
     }
     const updates={};
-    const keys=['GAME_SIZE','matchStarted','running','elapsed','half','half2StartElapsed','finished','selectedOut','history','events','subEvents','pendingEvent','scoreUSCM','scoreOpp','isHome','opponentName','matchDate','gkNum'];
+    const keys=['GAME_SIZE','matchStarted','running','elapsed','runningSinceWallMs','half','half2StartElapsed','finished','selectedOut','history','events','subEvents','pendingEvent','scoreUSCM','scoreOpp','isHome','opponentName','matchDate','gkNum'];
     keys.forEach(k=>{
       if(JSON.stringify(current[k])!==JSON.stringify(lastCloudState[k])) updates[k]=current[k];
     });
@@ -709,7 +711,7 @@ function applyCloudState(saved){
   try{
     GAME_SIZE=teamKey==='one'?11:Number(saved.GAME_SIZE||7);
     matchStarted=!!saved.matchStarted; running=!!saved.running;
-    elapsed=Math.max(0,Number(saved.elapsed||0)); half=Number(saved.half||1);
+    elapsed=Math.max(0,Number(saved.elapsed||0)); runningSinceWallMs=Number(saved.runningSinceWallMs||0); half=Number(saved.half||1);
     half2StartElapsed=Number(saved.half2StartElapsed||0); finished=!!saved.finished;
     selectedOut=saved.selectedOut??null; history=Array.isArray(saved.history)?saved.history:[];
     events=Array.isArray(saved.events)?saved.events:[]; subEvents=Array.isArray(saved.subEvents)?saved.subEvents:[];
@@ -717,7 +719,7 @@ function applyCloudState(saved){
     isHome=saved.isHome!==false; opponentName=String(saved.opponentName||''); matchDate=String(saved.matchDate||localDateISO()); gkNum=saved.gkNum??null;
     players=mergeRosterWithSaved(saved.players); matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
     clearInterval(timer);
-    if(running){last=performance.now();timer=setInterval(()=>{tick();render()},500)}
+    if(running){if(!runningSinceWallMs) runningSinceWallMs=Number(saved.savedAt||serverNowMs()); last=performance.now();timer=setInterval(()=>render(),500)}
     syncCode=normalizeSyncCode(saved.syncCode||syncCode);
     lastCloudState=cloneCloud(saved);
     try{localStorage.setItem(matchStateKey(),JSON.stringify(serializeMatchState()))}catch(e){}
@@ -776,6 +778,7 @@ function initSyncUI(){
   const activateFirebase=()=>{
     firebaseReady=!!window.USCM_FIREBASE?.ready;
     if(!firebaseReady){setSyncStatus('⚠️ Firebase indisponible');return}
+    window.USCM_FIREBASE.db.ref('.info/serverTimeOffset').on('value',snap=>{ serverTimeOffset=Number(snap.val()||0); });
     window.USCM_FIREBASE.auth.onAuthStateChanged(u=>{
       firebaseAuthUser=u||null;
       if(u){setSyncStatus('☁️ Connecté — local'); if(savedCode)attachSync(savedCode,false)}
@@ -795,6 +798,7 @@ function serializeMatchState(){
     matchStarted,
     running,
     elapsed,
+    runningSinceWallMs,
     half,
     half2StartElapsed,
     finished,
@@ -869,6 +873,7 @@ function restoreSavedMatchState(){
   matchStarted=!!saved.matchStarted;
   running=!!saved.running;
   elapsed=Math.max(0,Number(saved.elapsed||0));
+  runningSinceWallMs=Number(saved.runningSinceWallMs||0);
   half=Number(saved.half||1);
   half2StartElapsed=Number(saved.half2StartElapsed||0);
   finished=!!saved.finished;
@@ -886,16 +891,13 @@ function restoreSavedMatchState(){
   players=mergeRosterWithSaved(saved.players);
   matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
 
-  // If the page was suspended while the match was actually running, restore elapsed
-  // from wall-clock time since the last persistence point.
+  // The running clock is based on wall-clock/server time, not on JavaScript timer ticks.
+  // This survives iOS/iPadOS screen locking and background suspension.
   if(running){
-    const savedAt=Number(saved.savedAt||0);
-    if(savedAt>0){
-      elapsed += Math.max(0,(Date.now()-savedAt)/1000);
-    }
+    if(!runningSinceWallMs) runningSinceWallMs=Number(saved.savedAt||serverNowMs());
     last=performance.now();
     clearInterval(timer);
-    timer=setInterval(()=>{tick();render()},500);
+    timer=setInterval(()=>render(),500);
   }
   restoredMatchState=true;
   return true;
@@ -920,10 +922,20 @@ function matchDateLabel(){
 function msg(t){$("message").textContent=t;setTimeout(()=>$("message").textContent="",2200)}
 function activeSeg(p){return p.segs.length&&p.segs[p.segs.length-1].end===null?p.segs[p.segs.length-1]:null}
 function halfBaseSeconds(){return GAME_SIZE===11?45*60:30*60}
-function matchClock(){return half===1?elapsed:halfBaseSeconds()+Math.max(0,elapsed-half2StartElapsed)}
-function played(p){let n=p.segs.reduce((a,x)=>a+Math.max(0,x.end-x.start),0);const a=activeSeg(p);if(a)n+=Math.max(0,elapsed-a.start);return n}
+function serverNowMs(){return Date.now()+serverTimeOffset}
+function effectiveElapsed(){
+  if(!running || !runningSinceWallMs) return Math.max(0,elapsed);
+  return Math.max(0,elapsed+(serverNowMs()-runningSinceWallMs)/1000);
+}
+function commitElapsed(){
+  if(!running)return;
+  elapsed=effectiveElapsed();
+  runningSinceWallMs=serverNowMs();
+}
+function matchClock(){const e=effectiveElapsed();return half===1?e:halfBaseSeconds()+Math.max(0,e-half2StartElapsed)}
+function played(p){const e=effectiveElapsed();let n=p.segs.reduce((a,x)=>a+Math.max(0,x.end-x.start),0);const a=activeSeg(p);if(a)n+=Math.max(0,e-a.start);return n}
 function mm(p){const secs=played(p);return secs>0?Math.ceil(secs/60):0}
-function tick(){if(!running)return;const now=performance.now();elapsed+=Math.max(0,(now-last)/1000);last=now}
+function tick(){commitElapsed()}
 function eventIcon(t){return t==='goal'?'⚽':t==='penalty'?'⚽ P':t==='opp'?'🔴⚽':t==='yellow'?'🟨':'🟥'}
 function addEvent(type,p=null,detail=null){events.push({type,name:p?p.name:null,num:p?p.num:null,time:matchClock(),elapsedTime:elapsed,detail:detail||null});if(type==='goal'||type==='penalty')scoreUSCM++;if(type==='opp')scoreOpp++;renderEvents()}
 function addSub(out,inn){subEvents.push({out,inn,time:matchClock(),elapsedTime:elapsed});renderEvents()}
@@ -1034,7 +1046,7 @@ function enforceGoalkeeperInvariant(){
  if(!matchStarted)return true;
  const k=players.find(p=>p.gk);
  if(!k||k.ejected||!k.selected||!k.on){
-   if(running){tick();running=false;clearInterval(timer)}
+   if(running){tick();running=false;runningSinceWallMs=0;clearInterval(timer)}
    msg('Attention : une gardienne doit toujours être convoquée et sur le terrain.');
    return false;
  }
@@ -1055,7 +1067,7 @@ if(!matchStarted){
 }
 renderLeaderboard();renderEvents()}
 function resetMatchState(clearSaved=true){
- running=false;clearInterval(timer);elapsed=0;half=1;half2StartElapsed=0;selectedOut=null;half2StartElapsed=0;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;players=[];
+ running=false;clearInterval(timer);elapsed=0;runningSinceWallMs=0;half=1;half2StartElapsed=0;selectedOut=null;runningSinceWallMs=0;half2StartElapsed=0;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;players=[];
  opponentName='';matchDate=localDateISO();
  if(clearSaved)clearSavedMatchState();
 }
@@ -1087,7 +1099,7 @@ function setMode(size){
   GAME_SIZE=size;
   clearSavedMatchState();
   players.forEach(p=>{p.on=false;p.selected=false;p.ejected=false;p.yellows=0;p.segs=[]});
-  selectedOut=null;half2StartElapsed=0;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;
+  selectedOut=null;runningSinceWallMs=0;half2StartElapsed=0;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;
   syncTeamFormatUI();
   loadMatchRoster();
   render();
@@ -1100,12 +1112,12 @@ gkNum=num;render();msg(np.name+' est maintenant la gardienne.');}
 function chooseOut(num){if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche.');return}if(running)tick();const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg('Change d’abord de gardienne avant de la faire sortir.');return}const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;selectedOut=num;render()}
 function chooseIn(num){if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche.');return}if(selectedOut===null){msg('Choisis d’abord la joueuse qui sort.');return}const inn=players.find(x=>x.num===num),out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on||inn.ejected)return;if(players.filter(p=>p.on).length>=GAME_SIZE){msg('Il faut une sortie avant une entrée.');return}if(running)tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});addSub(out.name,inn.name);selectedOut=null;render()}
 
-function startMatch(){if(finished){msg('Match terminé. Utilise Nouveau pour recommencer.');return}if(running)return;if(!opponentName.trim()){msg('Saisis le nom de l’équipe adverse avant de démarrer.');$('opponentName').focus();return}const max=GAME_SIZE===11?18:14;const selectedCount=players.filter(p=>p.selected).length;const onCount=players.filter(p=>p.on&&!p.ejected).length;if(selectedCount>max){msg('Maximum de '+max+' joueuses convoquées.');return}if(half===1&&onCount!==GAME_SIZE){msg('Sélectionne exactement '+GAME_SIZE+' titulaires avant de démarrer.');return}if(half===2&&(onCount<1||onCount>GAME_SIZE)){msg('La 2e mi-temps reprend avec les joueuses encore autorisées à jouer.');return}const keeper=players.find(p=>p.gk);if(!keeper||!keeper.selected||!keeper.on||keeper.ejected){msg('Désigne une gardienne convoquée et présente sur le terrain avant de démarrer.');return}matchStarted=true;running=true;last=performance.now();players.filter(p=>p.on&&!p.ejected&&!activeSeg(p)).forEach(p=>p.segs.push({start:elapsed,end:null}));timer=setInterval(()=>{tick();render()},500);render()}
+function startMatch(){if(finished){msg('Match terminé. Utilise Nouveau pour recommencer.');return}if(running)return;if(!opponentName.trim()){msg('Saisis le nom de l’équipe adverse avant de démarrer.');$('opponentName').focus();return}const max=GAME_SIZE===11?18:14;const selectedCount=players.filter(p=>p.selected).length;const onCount=players.filter(p=>p.on&&!p.ejected).length;if(selectedCount>max){msg('Maximum de '+max+' joueuses convoquées.');return}if(half===1&&onCount!==GAME_SIZE){msg('Sélectionne exactement '+GAME_SIZE+' titulaires avant de démarrer.');return}if(half===2&&(onCount<1||onCount>GAME_SIZE)){msg('La 2e mi-temps reprend avec les joueuses encore autorisées à jouer.');return}const keeper=players.find(p=>p.gk);if(!keeper||!keeper.selected||!keeper.on||keeper.ejected){msg('Désigne une gardienne convoquée et présente sur le terrain avant de démarrer.');return}matchStarted=true;elapsed=effectiveElapsed();running=true;runningSinceWallMs=serverNowMs();players.filter(p=>p.on&&!p.ejected&&!activeSeg(p)).forEach(p=>p.segs.push({start:elapsed,end:null}));timer=setInterval(()=>render(),500);render()}
 function pauseMatch(){if(finished||!running)return;tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed});render()}
 function halfMatch(){
  if(finished||!matchStarted||half!==1)return;
  if(running){
-  tick();running=false;clearInterval(timer);
+  tick();running=false;runningSinceWallMs=0;clearInterval(timer);
   players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})
  }
  half2StartElapsed=elapsed;
@@ -1147,6 +1159,7 @@ function finishMatch(){
   if(running){
     tick();
     running=false;
+    runningSinceWallMs=0;
     clearInterval(timer);
     players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed});
   }else{
