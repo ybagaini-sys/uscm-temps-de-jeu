@@ -621,13 +621,11 @@ function loadTeams(){
   const base=getBaseTeams();
   try{
     const saved=JSON.parse(localStorage.getItem(STORAGE));
+    // A valid saved contingent is authoritative. Do not validate it by player names:
+    // names are editable permanent data, so such a check would silently erase a
+    // legitimate change after a reload/new match.
     if(validTeams(saved)){
-      // Sécurité contre un ancien mélange des deux contingents.
-      let fixed=cloneTeams(saved), changed=false;
-      if(!looksLikeUne(fixed.one)){ fixed.one=cloneTeams(base.one); changed=true; }
-      if(!looksLike28(fixed.plus28)){ fixed.plus28=cloneTeams(base.plus28); changed=true; }
-      fixed.one=sortRosterByNumber(fixed.one);
-      fixed.plus28=sortRosterByNumber(fixed.plus28);
+      const fixed={one:sortRosterByNumber(saved.one),plus28:sortRosterByNumber(saved.plus28)};
       try{localStorage.setItem(STORAGE,JSON.stringify(fixed))}catch(e){}
       return fixed;
     }
@@ -650,6 +648,7 @@ const $=id=>document.getElementById(id);
 const DURATIONS={7:60,9:60,11:90};
 let GAME_SIZE=7,matchStarted=false,running=false,last=0,elapsed=0,half=1,timer=null,finished=false,selectedOut=null,history=[],events=[],subEvents=[],pendingEvent=null,scoreUSCM=0,scoreOpp=0,isHome=true,opponentName='',matchDate='';
 let runningSinceWallMs=0;
+let liveRenderElapsed=0;
 let serverTimeOffset=0;
 let matchRoster=[],players=[],gkNum=null;
 const MATCH_STATE_PREFIX='uscm_temps_de_jeu_match_v1_';
@@ -702,7 +701,7 @@ function queueCloudSync(immediate=false){
       return;
     }
     const updates={};
-    const keys=['GAME_SIZE','matchStarted','running','elapsed','runningSinceWallMs','half','half2StartElapsed','finished','selectedOut','history','events','subEvents','pendingEvent','scoreUSCM','scoreOpp','isHome','opponentName','matchDate','gkNum'];
+    const keys=['GAME_SIZE','matchStarted','running','elapsed','runningSinceWallMs','half','half2StartElapsed','finished','selectedOut','history','events','subEvents','scoreUSCM','scoreOpp','isHome','opponentName','matchDate','gkNum'];
     keys.forEach(k=>{
       if(JSON.stringify(current[k])!==JSON.stringify(lastCloudState[k])) updates[k]=current[k];
     });
@@ -725,6 +724,8 @@ function queueCloudSync(immediate=false){
 }
 function applyCloudState(saved){
   if(!saved||saved.version!==1)return false;
+  const uiPendingEvent = pendingEvent;
+  const uiPlayerModalOpen = $('playerModal')?.classList.contains('open');
   cloudApplying=true;
   try{
     GAME_SIZE=teamKey==='one'?11:Number(saved.GAME_SIZE||7);
@@ -733,7 +734,10 @@ function applyCloudState(saved){
     half2StartElapsed=Number(saved.half2StartElapsed||0); finished=!!saved.finished;
     selectedOut=saved.selectedOut??null; history=Array.isArray(saved.history)?saved.history:[];
     events=Array.isArray(saved.events)?saved.events:[]; subEvents=Array.isArray(saved.subEvents)?saved.subEvents:[];
-    pendingEvent=saved.pendingEvent??null; scoreUSCM=Number(saved.scoreUSCM||0); scoreOpp=Number(saved.scoreOpp||0);
+    // pendingEvent is a local UI choice (not shared state). Never let a Firebase
+    // refresh cancel a goal/penalty/yellow/red selection currently open on this device.
+    pendingEvent = (uiPlayerModalOpen && uiPendingEvent) ? uiPendingEvent : null;
+    scoreUSCM=Number(saved.scoreUSCM||0); scoreOpp=Number(saved.scoreOpp||0);
     isHome=saved.isHome!==false; opponentName=String(saved.opponentName||''); matchDate=String(saved.matchDate||localDateISO()); gkNum=saved.gkNum??null;
     players=mergeRosterWithSaved(saved.players); matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
     clearInterval(timer);
@@ -824,7 +828,6 @@ function serializeMatchState(){
     history,
     events,
     subEvents,
-    pendingEvent,
     scoreUSCM,
     scoreOpp,
     isHome,
@@ -899,7 +902,7 @@ function restoreSavedMatchState(){
   history=Array.isArray(saved.history)?saved.history:[];
   events=Array.isArray(saved.events)?saved.events:[];
   subEvents=Array.isArray(saved.subEvents)?saved.subEvents:[];
-  pendingEvent=saved.pendingEvent??null;
+  pendingEvent=null;
   scoreUSCM=Number(saved.scoreUSCM||0);
   scoreOpp=Number(saved.scoreOpp||0);
   isHome=saved.isHome!==false;
@@ -942,17 +945,47 @@ function activeSeg(p){return p.segs.length&&p.segs[p.segs.length-1].end===null?p
 function halfBaseSeconds(){return GAME_SIZE===11?45*60:30*60}
 function serverNowMs(){return Date.now()+serverTimeOffset}
 function effectiveElapsed(){
-  if(!running || !runningSinceWallMs) return Math.max(0,elapsed);
-  return Math.max(0,elapsed+(serverNowMs()-runningSinceWallMs)/1000);
+  const base=Math.max(0,Number(elapsed)||0);
+  if(!running) return base;
+  const since=Number(runningSinceWallMs)||0;
+  if(!since){
+    // A running match must always have a valid wall-clock anchor.
+    // Re-anchor it instead of freezing the clock at the last saved value.
+    runningSinceWallMs=serverNowMs();
+    return base;
+  }
+  const delta=Math.max(0,(serverNowMs()-since)/1000);
+  return base+delta;
+}
+function displayElapsed(){
+  liveRenderElapsed=effectiveElapsed();
+  return liveRenderElapsed;
 }
 function commitElapsed(){
   if(!running)return;
-  elapsed=effectiveElapsed();
-  runningSinceWallMs=serverNowMs();
+  const now=serverNowMs();
+  const since=Number(runningSinceWallMs)||now;
+  elapsed=Math.max(0,Number(elapsed)||0)+Math.max(0,(now-since)/1000);
+  runningSinceWallMs=now;
+  liveRenderElapsed=elapsed;
 }
-function matchClock(){const e=effectiveElapsed();return half===1?e:halfBaseSeconds()+Math.max(0,e-half2StartElapsed)}
-function played(p){const e=effectiveElapsed();let n=p.segs.reduce((a,x)=>a+Math.max(0,x.end-x.start),0);const a=activeSeg(p);if(a)n+=Math.max(0,e-a.start);return n}
-function mm(p){const secs=played(p);return secs>0?Math.ceil(secs/60):0}
+function matchClock(e=effectiveElapsed()){return half===1?e:halfBaseSeconds()+Math.max(0,e-half2StartElapsed)}
+function played(p,e=effectiveElapsed()){
+  if(!p || !Array.isArray(p.segs)) return 0;
+  let n=0;
+  for(const x of p.segs){
+    const st=Number(x?.start);
+    if(!Number.isFinite(st)) continue;
+    const en=x?.end===null ? null : Number(x?.end);
+    if(en===null){
+      if(running && p.on) n+=Math.max(0,e-st);
+    }else if(Number.isFinite(en)){
+      n+=Math.max(0,en-st);
+    }
+  }
+  return n;
+}
+function mm(p,e=effectiveElapsed()){const secs=played(p,e);return secs>0?Math.ceil(secs/60):0}
 function tick(){commitElapsed()}
 function eventIcon(t){return t==='goal'?'⚽':t==='penalty'?'⚽ P':t==='opp'?'🔴⚽':t==='yellow'?'🟨':'🟥'}
 function addEvent(type,p=null,detail=null){events.push({type,name:p?p.name:null,num:p?p.num:null,time:matchClock(),elapsedTime:elapsed,detail:detail||null});if(type==='goal'||type==='penalty')scoreUSCM++;if(type==='opp')scoreOpp++;renderEvents()}
@@ -974,10 +1007,10 @@ function syncTeamFormatUI(){
   $('mode'+GAME_SIZE).classList.add('primary');
 }
 function applyTeamRules(){syncTeamFormatUI()}
-function renderLeaderboard(){
+function renderLeaderboard(renderElapsed=effectiveElapsed()){
  const source=matchStarted?players.filter(p=>p.selected):players;
- const sorted=[...source].sort((a,b)=>{const d=played(b)-played(a);return d||String(a.name||'').trim().localeCompare(String(b.name||'').trim(),'fr',{sensitivity:'base'});});
- $("leaderboard").innerHTML='<div class="lbTitle"><span class="label">TEMPS DE JEU EFFECTIF — DU PLUS AU MOINS</span><span class="count">'+source.length+' joueuses • en direct</span></div><div class="lbGrid" style="grid-template-rows:repeat('+Math.ceil(sorted.length/2)+',minmax(0,1fr))">'+sorted.map(p=>'<div class="lbItem '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected':'')+'"><div class="lbName">'+esc(p.name)+(p.gk?' 🧤':'')+playerBadges(p)+'</div><div class="lbTime">'+mm(p) + '′'+'</div></div>').join('')+'</div>'
+ const sorted=[...source].sort((a,b)=>{const d=played(b,renderElapsed)-played(a,renderElapsed);return d||String(a.name||'').trim().localeCompare(String(b.name||'').trim(),'fr',{sensitivity:'base'});});
+ $("leaderboard").innerHTML='<div class="lbTitle"><span class="label">TEMPS DE JEU EFFECTIF — DU PLUS AU MOINS</span><span class="count">'+source.length+' joueuses • en direct</span></div><div class="lbGrid" style="grid-template-rows:repeat('+Math.ceil(sorted.length/2)+',minmax(0,1fr))">'+sorted.map(p=>'<div class="lbItem '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected':'')+'"><div class="lbName">'+esc(p.name)+(p.gk?' 🧤':'')+playerBadges(p)+'</div><div class="lbTime">'+mm(p,renderElapsed)+'′</div></div>').join('')+'</div>'
 }
 function renderEvents(){
  $('subCount').textContent=subEvents.length+' changement'+(subEvents.length>1?'s':'');$('eventCount').textContent=events.length+' événement'+(events.length>1?'s':'');
@@ -987,13 +1020,13 @@ function renderEvents(){
 }
 function renderRecap(){const arr=[];subEvents.forEach(e=>arr.push({time:e.time,elapsed:e.elapsedTime??e.time,type:'Changement',detail:'<span class="out">'+esc(e.out)+'</span> → <span class="in">'+esc(e.inn)+'</span>'}));events.forEach(e=>arr.push({time:e.time,elapsed:e.elapsedTime??e.time,type:e.type==='goal'?'⚽ But USCM':e.type==='penalty'?'⚽ Pénalty':e.type==='opp'?'🔴 But adverse':e.type==='yellow'?'🟨 Carton jaune':'🟥 Carton rouge',detail:esc(eventLabel(e))}));arr.sort((a,b)=>a.elapsed-b.elapsed);$('recapScore').textContent=isHome?'USCM '+scoreUSCM+' — '+scoreOpp+' '+esc(opponentLabel()):esc(opponentLabel())+' '+scoreOpp+' — '+scoreUSCM+' USCM';$('recapMeta').textContent=opponentName.trim()?(opponentLabel()+(matchDateLabel()?' • '+matchDateLabel():'')):(matchDateLabel()?'Date : '+matchDateLabel():'');$('recapGrid').innerHTML='<div class="recapRow recapHead"><div class="recapCell">Temps</div><div class="recapCell">Type</div><div class="recapCell">Détail</div><div class="recapCell">Score</div></div>'+(arr.length?arr.map(e=>'<div class="recapRow"><div class="recapCell">'+fmt(e.time)+'</div><div class="recapCell recapType">'+e.type+'</div><div class="recapCell">'+e.detail+'</div><div class="recapCell">'+scoreAt(e.elapsed)+'</div></div>').join(''):'<div class="recapEmpty" style="grid-column:1/-1">Aucun événement enregistré.</div>');$('recapTimes').innerHTML=[...players].filter(p=>p.selected).sort((a,b)=>{const d=played(b)-played(a);return d||String(a.name||'').trim().localeCompare(String(b.name||'').trim(),'fr',{sensitivity:'base'})}).map(p=>'<div class="finalRow"><div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+(p.gk?' 🧤':'')+playerBadges(p)+'</div><div class="big">'+mm(p) + '′'+'</div></div></div>').join('')}
 function showRecap(){$('dashboard').classList.add('hidden');$('recapPanel').classList.add('open');renderRecap()}function hideRecap(){$('dashboard').classList.remove('hidden');$('recapPanel').classList.remove('open')}
-function renderList(el,list,onfield){
+function renderList(el,list,onfield,renderElapsed=effectiveElapsed()){
  el.innerHTML='';
  const visible=list.filter(p=>!matchStarted || p.selected).sort((a,b)=>{const na=String(a.name||'').trim(),nb=String(b.name||'').trim();return na.localeCompare(nb,'fr',{sensitivity:'base',numeric:false})||String(a.num).localeCompare(String(b.num),undefined,{numeric:true});});
  if(!visible.length){el.innerHTML='<div class="notice">'+(matchStarted?'Aucune joueuse convoquée dans cette zone.':'Aucune joueuse dans cette zone.')+'</div>';return}
  visible.forEach(p=>{
-  const m=mm(p),target=p.gk?60:30,rem=Math.max(0,target-m),d=document.createElement('div');
-  d.className='player '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected ':'')+(!p.selected&&!p.on?'unselected ':'')+(matchStarted&&p.selected&&played(p)<=0?'zeroPlay':'');
+  const m=mm(p,renderElapsed),target=p.gk?60:30,rem=Math.max(0,target-m),d=document.createElement('div');
+  d.className='player '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected ':'')+(!p.selected&&!p.on?'unselected ':'')+(matchStarted&&p.selected&&played(p,renderElapsed)<=0?'zeroPlay':'');
   d.innerHTML='<div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+playerBadges(p)+'</div><div class="time">'+m+'′</div></div><div class="subrow"><div><span class="badge">'+(p.gk?'🧤 GARDIENNE':p.on?'SUR LE TERRAIN':p.selected?'BANC':'NON CONVOQUÉE')+'</span> <span class="remaining">'+(p.gk?'objectif 60′':p.ejected?'EXCLUE':p.selected?'minimum 30′ • reste '+rem+'′':'à convoquer')+'</span></div></div><div class="progress"><div class="fill" style="width:'+Math.min(100,m/60*100)+'%"></div></div>';
   const actions=document.createElement('div');
   actions.className='preMatchActions';
@@ -1070,22 +1103,41 @@ function enforceGoalkeeperInvariant(){
  }
  return true;
 }
-function render(){enforceGoalkeeperInvariant();
+function render(){
+  enforceGoalkeeperInvariant();
+  const renderElapsed=displayElapsed();
   persistMatchState();
- $('clock').textContent=fmt(matchClock());$('score').textContent=isHome?scoreUSCM+' — '+scoreOpp:scoreOpp+' — '+scoreUSCM;$('scoreLabel').textContent=isHome?'USCM — '+opponentLabel():opponentLabel()+' — USCM';$('formatPanel').classList.toggle('compactHidden',matchStarted||finished);$('top').classList.toggle('compact',running||finished);$('homeBtn').classList.toggle('primary',isHome);$('awayBtn').classList.toggle('primary',!isHome);$('teamOne').classList.toggle('primary',teamKey==='one');$('team28').classList.toggle('primary',teamKey==='plus28');$('status').textContent=finished?'Match terminé — récapitulatif disponible':running?'Match en cours — mi-temps '+half:(elapsed?'Match en pause — mi-temps '+half:'Prêt — 1re mi-temps');$('finish').disabled=finished;$('half').disabled=finished||!matchStarted||half!==1;$('onCount').textContent=players.filter(p=>p.on).length+' / '+GAME_SIZE;$('benchCount').textContent=players.filter(p=>p.selected&&!p.on).length+' / '+(GAME_SIZE===11?18:14);$('starterHelp').textContent=running?'Pendant le match : SORTIE → ENTRÉE • chrono continu.':'Format '+GAME_SIZE+' — convoquez jusqu’à '+(GAME_SIZE===11?18:14)+' joueuses, puis sélectionnez '+GAME_SIZE+' titulaires. Utilisez CONVOQUER pour chaque joueuse présente. Avant démarrage : corrections possibles.';$('matchDuration').textContent=totalMinutes()+'′ + arrêts';$('liveDuration').textContent='Match '+totalMinutes()+'′ + arrêts';$('rosterInfo').textContent='Contingent : '+teams[teamKey].length+' joueuses • Convoquées : '+players.filter(p=>p.selected).length+' / '+(GAME_SIZE===11?18:14)+' • Gardienne : '+(players.find(p=>p.gk)?.name||'à définir');
-if($('opponentName'))$('opponentName').value=opponentName;
-if($('matchDate'))$('matchDate').value=matchDate;
-
-if(!matchStarted){
-  renderList($('onfield'),players.filter(p=>p.on),true);
-  renderList($('bench'),players.filter(p=>!p.on),false);
-}else{
-  renderList($('onfield'),players.filter(p=>p.on),true);
-  renderList($('bench'),players.filter(p=>p.selected&&!p.on),false);
+  $('clock').textContent=fmt(matchClock(renderElapsed));
+  $('score').textContent=isHome?scoreUSCM+' — '+scoreOpp:scoreOpp+' — '+scoreUSCM;
+  $('scoreLabel').textContent=isHome?'USCM — '+opponentLabel():opponentLabel()+' — USCM';
+  $('formatPanel').classList.toggle('compactHidden',matchStarted||finished);
+  $('top').classList.toggle('compact',running||finished);
+  $('homeBtn').classList.toggle('primary',isHome);$('awayBtn').classList.toggle('primary',!isHome);
+  $('teamOne').classList.toggle('primary',teamKey==='one');$('team28').classList.toggle('primary',teamKey==='plus28');
+  $('status').textContent=finished?'Match terminé — récapitulatif disponible':running?'Match en cours — mi-temps '+half:(elapsed?'Match en pause — mi-temps '+half:'Prêt — 1re mi-temps');
+  $('finish').disabled=finished;$('half').disabled=finished||!matchStarted||half!==1;
+  $('onCount').textContent=players.filter(p=>p.on).length+' / '+GAME_SIZE;
+  $('benchCount').textContent=players.filter(p=>p.selected&&!p.on).length+' / '+(GAME_SIZE===11?18:14);
+  $('starterHelp').textContent=running?'Pendant le match : SORTIE → ENTRÉE • chrono continu.':'Format '+GAME_SIZE+' — convoquez jusqu’à '+(GAME_SIZE===11?18:14)+' joueuses, puis sélectionnez '+GAME_SIZE+' titulaires. Utilisez CONVOQUER pour chaque joueuse présente. Avant démarrage : corrections possibles.';
+  $('matchDuration').textContent=totalMinutes()+'′ + arrêts';$('liveDuration').textContent='Match '+totalMinutes()+'′ + arrêts';
+  $('rosterInfo').textContent='Contingent : '+teams[teamKey].length+' joueuses • Convoquées : '+players.filter(p=>p.selected).length+' / '+(GAME_SIZE===11?18:14)+' • Gardienne : '+(players.find(p=>p.gk)?.name||'à définir');
+  if($('opponentName'))$('opponentName').value=opponentName;
+  if($('matchDate'))$('matchDate').value=matchDate;
+  if(!matchStarted){
+    renderList($('onfield'),players.filter(p=>p.on),true,renderElapsed);
+    renderList($('bench'),players.filter(p=>!p.on),false,renderElapsed);
+  }else{
+    renderList($('onfield'),players.filter(p=>p.on),true,renderElapsed);
+    renderList($('bench'),players.filter(p=>p.selected&&!p.on),false,renderElapsed);
+  }
+  renderLeaderboard(renderElapsed);renderEvents();
 }
-renderLeaderboard();renderEvents()}
+
+function wakeClockRender(){ if(running) render(); }
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) wakeClockRender(); });
+window.addEventListener('pageshow',wakeClockRender);
 function resetMatchState(clearSaved=true){
- running=false;clearInterval(timer);elapsed=0;runningSinceWallMs=0;half=1;half2StartElapsed=0;selectedOut=null;runningSinceWallMs=0;half2StartElapsed=0;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;players=[];
+ running=false;clearInterval(timer);elapsed=0;runningSinceWallMs=0;liveRenderElapsed=0;half=1;half2StartElapsed=0;selectedOut=null;runningSinceWallMs=0;half2StartElapsed=0;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;players=[];
  opponentName='';matchDate=localDateISO();
  if(clearSaved)clearSavedMatchState();
 }
@@ -1130,7 +1182,12 @@ gkNum=num;render();msg(np.name+' est maintenant la gardienne.');}
 function chooseOut(num){if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche.');return}if(running)tick();const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg('Change d’abord de gardienne avant de la faire sortir.');return}const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;selectedOut=num;render()}
 function chooseIn(num){if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche.');return}if(selectedOut===null){msg('Choisis d’abord la joueuse qui sort.');return}const inn=players.find(x=>x.num===num),out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on||inn.ejected)return;if(players.filter(p=>p.on).length>=GAME_SIZE){msg('Il faut une sortie avant une entrée.');return}if(running)tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});addSub(out.name,inn.name);selectedOut=null;render()}
 
-function startMatch(){if(finished){msg('Match terminé. Utilise Nouveau pour recommencer.');return}if(running)return;if(!opponentName.trim()){msg('Saisis le nom de l’équipe adverse avant de démarrer.');$('opponentName').focus();return}const max=GAME_SIZE===11?18:14;const selectedCount=players.filter(p=>p.selected).length;const onCount=players.filter(p=>p.on&&!p.ejected).length;if(selectedCount>max){msg('Maximum de '+max+' joueuses convoquées.');return}if(half===1&&onCount!==GAME_SIZE){msg('Sélectionne exactement '+GAME_SIZE+' titulaires avant de démarrer.');return}if(half===2&&(onCount<1||onCount>GAME_SIZE)){msg('La 2e mi-temps reprend avec les joueuses encore autorisées à jouer.');return}const keeper=players.find(p=>p.gk);if(!keeper||!keeper.selected||!keeper.on||keeper.ejected){msg('Désigne une gardienne convoquée et présente sur le terrain avant de démarrer.');return}matchStarted=true;elapsed=effectiveElapsed();running=true;runningSinceWallMs=serverNowMs();players.filter(p=>p.on&&!p.ejected&&!activeSeg(p)).forEach(p=>p.segs.push({start:elapsed,end:null}));timer=setInterval(()=>render(),500);render()}
+function startMatch(){if(finished){msg('Match terminé. Utilise Nouveau pour recommencer.');return}if(running)return;if(!opponentName.trim()){msg('Saisis le nom de l’équipe adverse avant de démarrer.');$('opponentName').focus();return}const max=GAME_SIZE===11?18:14;const selectedCount=players.filter(p=>p.selected).length;const onCount=players.filter(p=>p.on&&!p.ejected).length;if(selectedCount>max){msg('Maximum de '+max+' joueuses convoquées.');return}if(half===1&&onCount!==GAME_SIZE){msg('Sélectionne exactement '+GAME_SIZE+' titulaires avant de démarrer.');return}if(half===2&&(onCount<1||onCount>GAME_SIZE)){msg('La 2e mi-temps reprend avec les joueuses encore autorisées à jouer.');return}const keeper=players.find(p=>p.gk);if(!keeper||!keeper.selected||!keeper.on||keeper.ejected){msg('Désigne une gardienne convoquée et présente sur le terrain avant de démarrer.');return}matchStarted=true;
+running=true;
+runningSinceWallMs=serverNowMs();
+players.filter(p=>p.on&&!p.ejected&&!activeSeg(p)).forEach(p=>p.segs.push({start:elapsed,end:null}));
+timer=setInterval(()=>render(),500);
+render()}
 function pauseMatch(){if(finished||!running)return;tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed});render()}
 function halfMatch(){
  if(finished||!matchStarted||half!==1)return;
@@ -1141,9 +1198,54 @@ function halfMatch(){
  half2StartElapsed=elapsed;
  half=2;selectedOut=null;render();
 }
-function recordPlayerEvent(num){tick();const p=players.find(x=>x.num===num);if(!p||!running)return;if(pendingEvent==='yellow'){p.yellows++;if(p.yellows===1)addEvent('yellow',p,'1er carton jaune');else if(p.yellows===2){p.ejected=true;const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;addEvent('red',p,'carton rouge — 2e carton jaune');msg(p.name+' reçoit un 2e jaune : rouge automatique, exclusion définitive.')}}else if(pendingEvent==='red'){p.ejected=true;const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;addEvent('red',p,'carton rouge');msg(p.name+' est exclue définitivement. Aucun remplacement.')}else addEvent(pendingEvent,p);pendingEvent=null;$('playerModal').classList.remove('open');render()}
-function openPlayerModal(type){if(!running){msg('Le chrono doit être en marche.');return}pendingEvent=type;$('modalTitle').textContent=type==='goal'?'⚽ But USCM — qui a marqué ?':type==='penalty'?'⚽ Pénalty USCM — qui a marqué ?':type==='yellow'?'🟨 Carton jaune — joueuse ?':'🟥 Carton rouge — joueuse ?';$('modalGrid').innerHTML=players.filter(p=>p.on&&!p.ejected).map(p=>'<button type="button" data-pnum="'+p.num+'">'+esc(p.name)+'</button>').join('');$('modalGrid').querySelectorAll('button').forEach(b=>b.onclick=()=>recordPlayerEvent(b.dataset.pnum));$('playerModal').classList.add('open')}
-function recordOppGoal(){if(!running){msg('Le chrono doit être en marche.');return}tick();addEvent('opp');render()}
+function recordPlayerEvent(num,forcedType=null){
+  if(!running)return;
+  const p=players.find(x=>String(x.num)===String(num));
+  const type=forcedType||pendingEvent;
+  if(!p||!type)return;
+  tick();
+  if(type==='yellow'){
+    p.yellows=Number(p.yellows||0)+1;
+    if(p.yellows===1){
+      addEvent('yellow',p,'1er carton jaune');
+      msg(p.name+' reçoit un carton jaune.');
+    }else{
+      p.ejected=true;
+      const s=activeSeg(p);if(s)s.end=elapsed;
+      p.on=false;
+      addEvent('red',p,'carton rouge — 2e carton jaune');
+      msg(p.name+' reçoit un 2e jaune : rouge automatique, exclusion définitive.');
+    }
+  }else if(type==='red'){
+    p.ejected=true;
+    const s=activeSeg(p);if(s)s.end=elapsed;
+    p.on=false;
+    addEvent('red',p,'carton rouge');
+    msg(p.name+' est exclue définitivement. Aucun remplacement.');
+  }else if(type==='goal'||type==='penalty'){
+    addEvent(type,p);
+  }
+  pendingEvent=null;
+  $('playerModal').classList.remove('open');
+  render();
+  persistMatchState(true);
+}
+function openPlayerModal(type){
+  if(!running){msg('Le chrono doit être en marche.');return}
+  if(!['goal','penalty','yellow','red'].includes(type)){msg('Événement invalide.');return}
+  pendingEvent=null;
+  pendingEvent=type;
+  $('modalTitle').textContent=type==='goal'?'⚽ But USCM — qui a marqué ?':type==='penalty'?'⚽ Pénalty USCM — qui a marqué ?':type==='yellow'?'🟨 Carton jaune — joueuse ?':'🟥 Carton rouge — joueuse ?';
+  $('modalGrid').innerHTML=players.filter(p=>p.on&&!p.ejected).map(p=>'<button type="button" data-pnum="'+esc(p.num)+'">'+esc(p.name)+'</button>').join('');
+  $('playerModal').classList.add('open');
+}
+function recordOppGoal(){
+  if(!running){msg('Le chrono doit être en marche.');return}
+  tick();
+  addEvent('opp');
+  render();
+  persistMatchState(true);
+}
 function resetCurrentTeamToBase(){
   const base=getBaseTeams();
   teams[teamKey]=cloneTeams(base[teamKey]);
@@ -1156,10 +1258,14 @@ function resetCurrentTeamToBase(){
   msg('Contingent de base restauré pour '+(teamKey==='one'?'La Une féminine':'Femmes 28+')+'.');
 }
 function openRoster(){if(matchStarted||running){msg('Le contingent ne peut être modifié après le début du match.');return}renderRosterModal();$('rosterModal').classList.add('open')}
-function syncPlayersAfterPermanentRosterChange(){
+function syncPlayersAfterPermanentRosterChange(oldKey=null,newKey=null){
  const roster=normalizeRoster(teams[teamKey]);
- const oldPermanent=new Set((matchRoster||[]).map(p=>String(p.num)+'|'+String(p.name)));
- const tempPlayers=players.filter(p=>!oldPermanent.has(String(p.num)+'|'+String(p.name)));
+ const permanentKeys=new Set(roster.map(([num,name])=>String(num)+'|'+String(name)));
+ const previousPermanent=new Set((matchRoster||[]).map(p=>String(p.num)+'|'+String(p.name)));
+ if(oldKey&&newKey&&oldKey!==newKey){
+   const changed=players.find(p=>String(p.num)+'|'+String(p.name)===oldKey);
+   if(changed){const sep=newKey.indexOf('|');changed.num=newKey.slice(0,sep);changed.name=newKey.slice(sep+1)}
+ }
  const byKey=new Map(players.map(p=>[String(p.num)+'|'+String(p.name),p]));
  const synced=roster.map(([num,name])=>{
    const key=String(num)+'|'+String(name);
@@ -1167,53 +1273,101 @@ function syncPlayersAfterPermanentRosterChange(){
    if(p)return p;
    return {num:String(num),name:String(name),gk:false,on:false,selected:false,ejected:false,yellows:0,segs:[]};
  });
+ const tempPlayers=players.filter(p=>{
+   const key=String(p.num)+'|'+String(p.name);
+   return !permanentKeys.has(key) && !previousPermanent.has(key);
+ });
  players=[...synced,...tempPlayers];
  matchRoster=roster.map(p=>({num:String(p[0]),name:String(p[1])}));
 }
 function renderRosterModal(){
  const t=sortRosterByNumber(teams[teamKey]);
  $('rosterModalInfo').textContent=(teamKey==='one'?'La Une féminine':'Femmes 28+')+' • '+t.length+' joueuses. N° et prénoms réels affichés ci-dessous. Les modifications définitives sont conservées après actualisation. Le contingent de base peut être restauré.';
- $('rosterRows').innerHTML='<div class="rosterHead"><div>N°</div><div>Prénom</div><div>Modifier</div><div></div></div>'+
- t.map((p,i)=>'<div class="player rosterRow" style="margin-top:3px"><div class="row"><div class="num">'+esc(p[0]||'—')+'</div><div class="name">'+esc(p[1])+'</div><button type="button" data-edit="'+i+'" style="min-height:26px">✏️ Modifier</button><button type="button" data-del="'+i+'" aria-label="Supprimer" title="Supprimer" style="min-height:26px">🗑️</button></div></div>').join('');
- $('rosterRows').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editRoster(+b.dataset.edit));$('rosterRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteRoster(+b.dataset.del));
- $('rosterRows').parentElement.querySelector('#rosterResetArea')?.remove();$('rosterRows').insertAdjacentHTML('afterend','<div id="rosterResetArea" style="display:flex;gap:4px;margin-top:5px"><button type="button" id="resetCurrentRoster" style="min-height:27px;font-size:9px">↺ Restaurer le contingent de base</button></div>');$('resetCurrentRoster').onclick=()=>{if(confirm('Restaurer le contingent de base de cette équipe ? Les modifications permanentes de cette équipe seront perdues.'))resetCurrentTeamToBase();renderRosterModal()}
+ $('rosterRows').innerHTML='<div class="rosterHead"><div>N°</div><div>Prénom</div><div>Modifier</div><div></div></div>'+t.map(p=>'<div class="player rosterRow" style="margin-top:3px"><div class="row"><div class="num">'+esc(p[0]||'—')+'</div><div class="name">'+esc(p[1])+'</div><button type="button" data-edit-num="'+esc(p[0])+'" style="min-height:26px">✏️ Modifier</button><button type="button" data-del-num="'+esc(p[0])+'" aria-label="Supprimer" title="Supprimer">🗑️</button></div></div>').join('');
+ $('rosterRows').querySelectorAll('[data-edit-num]').forEach(b=>b.onclick=()=>editRosterByNum(b.dataset.editNum));
+ $('rosterRows').querySelectorAll('[data-del-num]').forEach(b=>b.onclick=()=>deleteRosterByNum(b.dataset.delNum));
+ $('rosterRows').parentElement.querySelector('#rosterResetArea')?.remove();
+ $('rosterRows').insertAdjacentHTML('afterend','<div id="rosterResetArea" style="display:flex;gap:4px;margin-top:5px"><button type="button" id="resetCurrentRoster" style="min-height:27px;font-size:9px">↺ Restaurer le contingent de base</button></div>');
+ $('resetCurrentRoster').onclick=()=>{if(confirm('Restaurer le contingent de base de cette équipe ? Les modifications permanentes de cette équipe seront perdues.'))resetCurrentTeamToBase();renderRosterModal()}
 }
-function editRoster(i){
- const p=teams[teamKey][i],oldNum=String(p[0]),oldName=String(p[1]);
+function editRosterByNum(oldNum){
+ const idx=teams[teamKey].findIndex(p=>String(p[0])===String(oldNum));
+ if(idx<0){msg('Joueuse introuvable dans le contingent.');return}
+ const p=teams[teamKey][idx],oldKey=String(p[0])+'|'+String(p[1]);
  const name=prompt('Prénom de la joueuse',p[1]);if(name===null)return;if(!name.trim()){msg('Le prénom est obligatoire.');return}
  const num=prompt('Nouveau numéro de maillot',p[0]||'');if(num===null||!num.trim())return;
  const scope=prompt('Modification du numéro :\nD = définitive (contingent)\nP = provisoire (ce match uniquement)','D');if(scope===null)return;
  const mode=scope.trim().toUpperCase();if(mode!=='D'&&mode!=='P'){msg('Choisis D pour définitive ou P pour provisoire.');return}
+ const newNum=num.trim(),newName=name.trim(),newKey=newNum+'|'+newName;
  if(mode==='D'){
-   const newNum=num.trim(),newName=name.trim();
-   if(teams[teamKey].some((x,j)=>j!==i&&x[0]===newNum)){msg('Ce numéro existe déjà dans ce contingent.');return}
-   teams[teamKey][i]=[newNum,newName];
-   const cur=players.find(x=>String(x.num)===oldNum&&String(x.name)===oldName);
-   if(cur){cur.num=newNum;cur.name=newName}
+   if(teams[teamKey].some((x,j)=>j!==idx&&String(x[0])===newNum)){msg('Ce numéro existe déjà dans ce contingent.');return}
+   teams[teamKey][idx]=[newNum,newName];
    saveTeams();
-   syncPlayersAfterPermanentRosterChange();
+   // Re-read the just-saved permanent contingent so a subsequent New match or
+   // reload cannot fall back to a stale in-memory roster.
+   teams=loadTeams();
+   syncPlayersAfterPermanentRosterChange(oldKey,newKey);
+   persistMatchState(true);
+   msg('Modification définitive enregistrée.');
  }else{
-   const oldKey=oldNum+'|'+oldName,cur=players.find(x=>String(x.num)+'|'+String(x.name)===oldKey);
-   if(cur){if(players.some(x=>x!==cur&&String(x.num)===num.trim())){msg('Ce numéro existe déjà pour ce match.');return}cur.num=num.trim();cur.name=name.trim()}
+   const cur=players.find(x=>String(x.num)+'|'+String(x.name)===oldKey);
+   if(cur){if(players.some(x=>x!==cur&&String(x.num)===newNum)){msg('Ce numéro existe déjà pour ce match.');return}cur.num=newNum;cur.name=newName}
    else{msg('La modification provisoire s’appliquera au prochain chargement du match.');}
  }
  renderRosterModal();render();
 }
-function deleteRoster(i){
- const p=teams[teamKey][i];if(!confirm('Supprimer définitivement '+p[1]+' du contingent ?'))return;
- teams[teamKey].splice(i,1);saveTeams();
- const idx=players.findIndex(x=>String(x.num)===String(p[0])&&String(x.name)===String(p[1]));if(idx>=0)players.splice(idx,1);
- syncPlayersAfterPermanentRosterChange();renderRosterModal();render();
+function deleteRosterByNum(num){
+ const idx=teams[teamKey].findIndex(p=>String(p[0])===String(num));
+ if(idx<0){msg('Joueuse introuvable dans le contingent.');return}
+ const p=teams[teamKey][idx];if(!confirm('Supprimer définitivement '+p[1]+' du contingent ?'))return;
+ const oldKey=String(p[0])+'|'+String(p[1]);
+ teams[teamKey].splice(idx,1);saveTeams();
+ teams=loadTeams();
+ players=players.filter(x=>String(x.num)+'|'+String(x.name)!==oldKey);
+ syncPlayersAfterPermanentRosterChange();
+ persistMatchState(true);
+ renderRosterModal();render();
 }
 function addRoster(){
  const name=prompt('Prénom de la nouvelle joueuse');if(name===null)return;const num=prompt('Numéro de maillot permanent');if(num===null)return;if(!name.trim()||!num.trim()){msg('Le prénom et le numéro sont obligatoires.');return}
- if(teams[teamKey].some(p=>p[0]===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}
- teams[teamKey].push([num.trim(),name.trim()]);saveTeams();syncPlayersAfterPermanentRosterChange();renderRosterModal();render();
+ if(teams[teamKey].some(p=>String(p[0])===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}
+ teams[teamKey].push([num.trim(),name.trim()]);
+ saveTeams();
+ teams=loadTeams();
+ syncPlayersAfterPermanentRosterChange();
+ persistMatchState(true);
+ renderRosterModal();render();
 }
 // Temporary match-only player and temporary jersey change.
 function addMatchPlayer(){if(matchStarted||running){msg('Impossible après le début du match.');return}const name=prompt('Prénom de la joueuse ajoutée pour ce match uniquement');if(name===null||!name.trim())return;const num=prompt('Numéro de maillot pour ce match');if(num===null||!num.trim())return;if(players.some(p=>p.num===num.trim())){msg('Ce numéro est déjà utilisé pour ce match.');return}const max=GAME_SIZE===11?18:14;players.push({num:num.trim(),name:name.trim(),gk:false,on:false,selected:players.filter(p=>p.selected).length<max,ejected:false,yellows:0,segs:[]});render()}
-function startNew(){if(!confirm('Réinitialiser le match ? Le contingent permanent ne sera pas modifié.'))return;resetMatchState(true);loadMatchRoster();render()}
+function startNew(){
+  if(!confirm('Réinitialiser le match ? Le contingent permanent ne sera pas modifié.'))return;
+  // A new match must start from the CURRENT permanent contingent, never from a
+  // previous shared/local match snapshot. Clear the old local snapshot first.
+  resetMatchState(true);
+  loadTeams();
+  teams=loadTeams();
+  GAME_SIZE=(teamKey==='one')?11:7;
+  loadMatchRoster();
+  // If this match is shared, replace the old shared match state atomically from
+  // the freshly loaded permanent roster so the other device also starts clean.
+  lastCloudState=null;
+  if(syncRef && firebaseReady){
+    queueCloudSync(true);
+  }
+  render();
+}
 function undoChange(){if(finished){msg('Le match est terminé.');return}if(!history.length){msg('Aucun changement à annuler.');return}const h=history.pop(),inn=players.find(p=>p.num===h.inn),out=players.find(p=>p.num===h.out);if(inn){const s=activeSeg(inn);if(s)s.end=h.time;inn.on=false}if(out){out.on=true;out.segs.push({start:h.time,end:null})}const i=subEvents.findIndex(e=>e.time===h.time&&e.out===out.name&&e.inn===inn.name);if(i>=0)subEvents.splice(i,1);selectedOut=null;render()}
+$('modalGrid').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-pnum]');
+  if(!b||!$('playerModal').classList.contains('open'))return;
+  e.preventDefault();
+  e.stopPropagation();
+  // Capture the selected event locally before any Firebase/render callback can run.
+  const selectedEvent=pendingEvent;
+  if(!selectedEvent)return;
+  recordPlayerEvent(b.dataset.pnum,selectedEvent);
+});
 $('opponentName').addEventListener('input',e=>{if(!matchStarted&&!running){opponentName=e.target.value;render()}});
 $('matchDate').addEventListener('change',e=>{if(!matchStarted&&!running){matchDate=e.target.value;render()}});
 $('start').onclick=startMatch;$('pause').onclick=pauseMatch;$('half').onclick=halfMatch;$('undo').onclick=undoChange;$('new').onclick=startNew;$('finish').onclick=finishMatch;$('finish').addEventListener('click',finishMatch);$('recapBtn').onclick=showRecap;$('printRecap').onclick=()=>window.print();$('backBtn').onclick=hideRecap;$('homeBtn').onclick=()=>{if(matchStarted||running){msg('Le lieu ne peut plus être modifié après le début du match.');return}isHome=true;render()};$('awayBtn').onclick=()=>{if(matchStarted||running){msg('Le lieu ne peut plus être modifié après le début du match.');return}isHome=false;render()};$('teamOne').onclick=()=>selectTeam('one');$('team28').onclick=()=>selectTeam('plus28');$('manageRoster').onclick=openRoster;$('rosterClose').onclick=()=>$('rosterModal').classList.remove('open');$('addPlayer').onclick=addRoster;$('modalCancel').onclick=()=>{$('playerModal').classList.remove('open');pendingEvent=null};document.querySelectorAll('[data-event]').forEach(b=>b.onclick=()=>b.dataset.event==='opp'?recordOppGoal():openPlayerModal(b.dataset.event));$('mode7').onclick=()=>setMode(7);$('mode9').onclick=()=>setMode(9);$('mode11').onclick=()=>setMode(11);
