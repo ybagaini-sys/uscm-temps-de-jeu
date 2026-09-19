@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>USCM — Temps de jeu</title>
-<meta name="uscm-build" content="V36.7-TEMPS-JEU-ROBUSTE">
+<meta name="uscm-build" content="V36.8-TEMPS-JEU-ROBUSTE">
 <link rel="manifest" href="./manifest.webmanifest">
 <meta name="theme-color" content="#f3f5f9">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -983,12 +983,12 @@ function commitElapsed(){
   runningSinceWallMs=now;
   liveRenderElapsed=elapsed;
 }
-// V36.7: player time is derived from the match clock and presence anchor.
+// V36.8: player time is derived from the match clock and presence anchor.
 // This is deliberately independent from setInterval/render ticks. The display
 // can be suspended by iPadOS without stopping the actual time calculation.
 function ensurePlayerTiming(p){
   if(!p)return;
-  // V36.7: one authoritative local timing model.
+  // V36.8: one authoritative local timing model.
   // playedBase = seconds already completed on the field.
   // onSinceElapsed = match elapsed second at which the current spell started.
   if(!Number.isFinite(Number(p.playedBase))) p.playedBase=0;
@@ -1069,6 +1069,7 @@ function syncTeamFormatUI(){
   $('mode7').disabled=one;
   $('mode9').disabled=one;
   $('mode11').disabled=!one;
+  $('mode11').hidden=!one;
   $('mode7').style.display=one?'none':'';
   $('mode9').style.display=one?'none':'';
   $('mode11').style.display=one?'':'none';
@@ -1450,17 +1451,24 @@ $('matchDate').addEventListener('change',e=>{if(!matchStarted&&!running){matchDa
 $('start').onclick=startMatch;$('pause').onclick=pauseMatch;$('half').onclick=halfMatch;$('undo').onclick=undoChange;$('new').onclick=startNew;$('finish').onclick=finishMatch;$('finish').addEventListener('click',finishMatch);$('recapBtn').onclick=showRecap;$('printRecap').onclick=()=>window.print();$('backBtn').onclick=hideRecap;$('homeBtn').onclick=()=>{if(matchStarted||running){msg('Le lieu ne peut plus être modifié après le début du match.');return}isHome=true;render()};$('awayBtn').onclick=()=>{if(matchStarted||running){msg('Le lieu ne peut plus être modifié après le début du match.');return}isHome=false;render()};$('teamOne').onclick=()=>selectTeam('one');$('team28').onclick=()=>selectTeam('plus28');$('manageRoster').onclick=openRoster;$('rosterClose').onclick=()=>$('rosterModal').classList.remove('open');$('addPlayer').onclick=addRoster;$('modalCancel').onclick=()=>{$('playerModal').classList.remove('open');pendingEvent=null};document.querySelectorAll('[data-event]').forEach(b=>b.onclick=()=>b.dataset.event==='opp'?recordOppGoal():openPlayerModal(b.dataset.event));$('mode7').onclick=()=>{if(teamKey==='one')return;setMode(7)};$('mode9').onclick=()=>{if(teamKey==='one')return;setMode(9)};$('mode11').onclick=()=>{if(teamKey!=='one')return;setMode(11)};
 function finishMatch(){
   if(finished)return;
+  // IMPORTANT: player timing is expressed in MATCH ELAPSED SECONDS.
+  // Never pass serverNowMs() (milliseconds since epoch) to commitPlayerTimes().
+  // Doing so produces the huge values that were visible after clicking FIN.
+  let finalElapsed=effectiveElapsed();
   if(running){
     tick();
-    const now=serverNowMs();
-    commitPlayerTimes(now);
+    finalElapsed=elapsed;
+    commitPlayerTimes(finalElapsed);
+    // The players have now been committed exactly up to the final match second.
     running=false;
     runningSinceWallMs=0;
     clearInterval(timer);
-    players.forEach(p=>{if(p.on)stopPlayerTiming(p,effectiveElapsed())});
   }else{
-    players.forEach(p=>{if(p.on)stopPlayerTiming(p,effectiveElapsed())});
+    finalElapsed=Math.max(0,Number(elapsed)||0);
+    commitPlayerTimes(finalElapsed);
   }
+  // Ensure every player still on the field is closed at the exact same final elapsed time.
+  players.forEach(p=>{if(p.on)stopPlayerTiming(p,finalElapsed)});
   finished=true;
   selectedOut=null;
   persistMatchState(true);
