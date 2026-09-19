@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>USCM — Temps de jeu</title>
-<meta name="uscm-build" content="V34.5-MOBILE-IPAD-FIX-PERSISTANCE-HORS-LIGNE">
+<meta name="uscm-build" content="V36.7-TEMPS-JEU-ROBUSTE">
 <link rel="manifest" href="./manifest.webmanifest">
 <meta name="theme-color" content="#f3f5f9">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -735,7 +735,12 @@ function applyCloudState(saved){
       teams={one:sortRosterByNumber(saved.teams.one),plus28:sortRosterByNumber(saved.teams.plus28)};
       try{localStorage.setItem(STORAGE,JSON.stringify(teams))}catch(e){}
     }
-    GAME_SIZE=teamKey==='one'?11:Number(saved.GAME_SIZE||7);
+    const cloudSize=Number(saved.GAME_SIZE);
+    if(!isAllowedGameSize(teamKey,cloudSize)){
+      msg(teamKey==='one'?'La Une féminine est obligatoirement en 11.':'Les Femmes 28+ jouent uniquement à 7 ou 9.');
+      return false;
+    }
+    GAME_SIZE=cloudSize;
     matchStarted=!!saved.matchStarted; running=!!saved.running;
     elapsed=Math.max(0,Number(saved.elapsed||0)); runningSinceWallMs=Number(saved.runningSinceWallMs||0); half=Number(saved.half||1);
     half2StartElapsed=Number(saved.half2StartElapsed||0); finished=!!saved.finished;
@@ -746,9 +751,9 @@ function applyCloudState(saved){
     pendingEvent = (uiPlayerModalOpen && uiPendingEvent) ? uiPendingEvent : null;
     scoreUSCM=Number(saved.scoreUSCM||0); scoreOpp=Number(saved.scoreOpp||0);
     isHome=saved.isHome!==false; opponentName=String(saved.opponentName||''); matchDate=String(saved.matchDate||localDateISO()); gkNum=saved.gkNum??null;
-    players=mergeRosterWithSaved(saved.players); matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
+    players=mergeRosterWithSaved(saved.players); players.forEach(ensurePlayerTiming); matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
     clearInterval(timer);
-    if(running){if(!runningSinceWallMs) runningSinceWallMs=Number(saved.savedAt||serverNowMs()); last=performance.now();timer=setInterval(()=>render(),500)}
+    if(running){if(!runningSinceWallMs) runningSinceWallMs=Number(saved.savedAt||serverNowMs()); last=performance.now();timer=setInterval(()=>{render();if(running)persistMatchState(false)},500)}
     syncCode=normalizeSyncCode(saved.syncCode||syncCode);
     lastCloudState=cloneCloud(saved);
     try{localStorage.setItem(matchStateKey(),JSON.stringify(serializeMatchState()))}catch(e){}
@@ -845,6 +850,7 @@ function serializeMatchState(){
     players:players.map(p=>({
       num:String(p.num), name:String(p.name), gk:!!p.gk, on:!!p.on,
       selected:!!p.selected, ejected:!!p.ejected, yellows:Number(p.yellows||0),
+      playedBase:Number(p.playedBase||0), onSinceElapsed:p.onSinceElapsed==null?null:Number(p.onSinceElapsed), onSinceWallMs:null,
       segs:Array.isArray(p.segs)?p.segs.map(x=>({start:Number(x.start||0),end:x.end===null?null:Number(x.end||0)})):[]
     })),
     savedAt:Date.now()
@@ -874,16 +880,16 @@ function mergeRosterWithSaved(savedPlayers){
     return old ? {
       num, name,
       gk:!!old.gk,on:!!old.on,selected:!!old.selected,ejected:!!old.ejected,
-      yellows:Number(old.yellows||0),
+      yellows:Number(old.yellows||0), playedBase:Number(old.playedBase||0), onSinceElapsed:old.onSinceElapsed==null?null:Number(old.onSinceElapsed), onSinceWallMs:old.onSinceWallMs==null?null:Number(old.onSinceWallMs), _timingV367:false,
       segs:Array.isArray(old.segs)?old.segs.map(z=>({start:Number(z.start||0),end:z.end===null?null:Number(z.end||0)})):[]
-    } : {num,name,gk:false,on:false,selected:false,ejected:false,yellows:0,segs:[]};
+    } : {num,name,gk:false,on:false,selected:false,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,_timingV367:true,segs:[]};
   });
   // Preserve temporary match-only players even though they are not in the permanent roster.
   (savedPlayers||[]).forEach(p=>{
     if(!rosterNums.has(String(p.num))){
       merged.push({
         num:String(p.num),name:String(p.name),gk:!!p.gk,on:!!p.on,selected:!!p.selected,
-        ejected:!!p.ejected,yellows:Number(p.yellows||0),
+        ejected:!!p.ejected,yellows:Number(p.yellows||0),playedBase:Number(p.playedBase||0),onSinceElapsed:p.onSinceElapsed==null?null:Number(p.onSinceElapsed),onSinceWallMs:p.onSinceWallMs==null?null:Number(p.onSinceWallMs),_timingV367:false,
         segs:Array.isArray(p.segs)?p.segs.map(z=>({start:Number(z.start||0),end:z.end===null?null:Number(z.end||0)})):[]
       });
     }
@@ -896,9 +902,9 @@ function restoreSavedMatchState(){
   let saved=null;
   try{saved=JSON.parse(localStorage.getItem(matchStateKey()))}catch(e){saved=null}
   if(!saved || saved.version!==1 || saved.teamKey!==teamKey) return false;
-  if(Number(saved.GAME_SIZE)!==(teamKey==='one'?11:Number(saved.GAME_SIZE))) return false;
+  if(!isAllowedGameSize(teamKey,Number(saved.GAME_SIZE))) return false;
 
-  GAME_SIZE=teamKey==='one'?11:Number(saved.GAME_SIZE||11);
+  GAME_SIZE=Number(saved.GAME_SIZE);
   matchStarted=!!saved.matchStarted;
   running=!!saved.running;
   elapsed=Math.max(0,Number(saved.elapsed||0));
@@ -977,20 +983,69 @@ function commitElapsed(){
   runningSinceWallMs=now;
   liveRenderElapsed=elapsed;
 }
-function matchClock(e=effectiveElapsed()){return half===1?e:halfBaseSeconds()+Math.max(0,e-half2StartElapsed)}
-function played(p,e=effectiveElapsed()){
-  if(!p || !Array.isArray(p.segs)) return 0;
-  let n=0;
-  for(const x of p.segs){
-    const st=Number(x?.start);
-    if(!Number.isFinite(st)) continue;
-    const en=x?.end===null ? null : Number(x?.end);
-    if(en===null){
-      if(running && p.on) n+=Math.max(0,e-st);
-    }else if(Number.isFinite(en)){
-      n+=Math.max(0,en-st);
+// V36.7: player time is derived from the match clock and presence anchor.
+// This is deliberately independent from setInterval/render ticks. The display
+// can be suspended by iPadOS without stopping the actual time calculation.
+function ensurePlayerTiming(p){
+  if(!p)return;
+  // V36.7: one authoritative local timing model.
+  // playedBase = seconds already completed on the field.
+  // onSinceElapsed = match elapsed second at which the current spell started.
+  if(!Number.isFinite(Number(p.playedBase))) p.playedBase=0;
+  if(p.onSinceElapsed===undefined) p.onSinceElapsed=null;
+  if(p._timingV367) return;
+
+  let base=Math.max(0,Number(p.playedBase)||0);
+  let activeStart=null;
+  if(Array.isArray(p.segs)){
+    for(const x of p.segs){
+      const st=Number(x?.start);
+      const en=x?.end===null?null:Number(x?.end);
+      if(!Number.isFinite(st)) continue;
+      if(en===null){ activeStart=st; }
+      else if(Number.isFinite(en)) base+=Math.max(0,en-st);
     }
   }
+  if(p.on){
+    if(Number.isFinite(Number(p.onSinceElapsed))) activeStart=Number(p.onSinceElapsed);
+    else if(activeStart!==null) p.onSinceElapsed=activeStart;
+    else p.onSinceElapsed=effectiveElapsed();
+  }else p.onSinceElapsed=null;
+  p.playedBase=base;
+  p._timingV367=true;
+}
+function commitPlayerTimes(e=effectiveElapsed()){
+  e=Math.max(0,Number(e)||0);
+  for(const p of players){
+    ensurePlayerTiming(p);
+    if(p.on){
+      if(!Number.isFinite(Number(p.onSinceElapsed))) p.onSinceElapsed=e;
+      const delta=Math.max(0,e-Number(p.onSinceElapsed));
+      p.playedBase=Math.max(0,Number(p.playedBase)||0)+delta;
+      p.onSinceElapsed=e;
+    }
+  }
+}
+function startPlayerTiming(p,e=effectiveElapsed()){
+  ensurePlayerTiming(p);
+  p.onSinceElapsed=Math.max(0,Number(e)||0);
+  p._timingV367=true;
+}
+function stopPlayerTiming(p,e=effectiveElapsed()){
+  ensurePlayerTiming(p);
+  if(p.on){
+    if(!Number.isFinite(Number(p.onSinceElapsed))) p.onSinceElapsed=e;
+    p.playedBase=Math.max(0,Number(p.playedBase)||0)+Math.max(0,e-Number(p.onSinceElapsed));
+  }
+  p.onSinceElapsed=null;
+  p._timingV367=true;
+}
+function matchClock(e=effectiveElapsed()){return half===1?e:halfBaseSeconds()+Math.max(0,e-half2StartElapsed)}
+function played(p,e=effectiveElapsed()){
+  if(!p)return 0;
+  ensurePlayerTiming(p);
+  let n=Math.max(0,Number(p.playedBase)||0);
+  if(running && p.on && Number.isFinite(Number(p.onSinceElapsed))) n+=Math.max(0,Number(e)-Number(p.onSinceElapsed));
   return n;
 }
 function mm(p,e=effectiveElapsed()){const secs=played(p,e);return secs>0?Math.ceil(secs/60):0}
@@ -1003,14 +1058,23 @@ function scoreAt(t){let a=0,b=0;events.filter(e=>(e.elapsedTime??e.time)<=t).sor
 function playerBadges(p){let s='';const goals=events.filter(e=>e.type==='goal'&&e.num===p.num).length,pens=events.filter(e=>e.type==='penalty'&&e.num===p.num).length,y=events.filter(e=>e.type==='yellow'&&e.num===p.num).length,r=events.filter(e=>e.type==='red'&&e.num===p.num).length;if(goals)s+='⚽'+(goals>1?goals:'');if(pens)s+=' ⚽P'+(pens>1?pens:'');if(y)s+=' 🟨'+(y>1?y:'');if(r)s+=' 🟥';return s?'<span class="playerBadges">'+s+'</span>':''}
 
 
+function allowedFormatsForTeam(k){return k==='one'?[11]:[7,9]}
+function isAllowedGameSize(k,size){return allowedFormatsForTeam(k).includes(Number(size))}
+function defaultGameSizeForTeam(k){return k==='one'?11:7}
+function maxConvokedForTeam(k){return k==='one'?18:14}
+
 function syncTeamFormatUI(){
   const one=teamKey==='one';
+  if(!isAllowedGameSize(teamKey,GAME_SIZE)) GAME_SIZE=defaultGameSizeForTeam(teamKey);
   $('mode7').disabled=one;
   $('mode9').disabled=one;
+  $('mode11').disabled=!one;
+  $('mode7').style.display=one?'none':'';
+  $('mode9').style.display=one?'none':'';
+  $('mode11').style.display=one?'':'none';
   $('mode7').classList.toggle('locked',one);
   $('mode9').classList.toggle('locked',one);
-  $('mode11').disabled=false;
-  if(one) GAME_SIZE=11;
+  $('mode11').classList.toggle('locked',!one);
   ['mode7','mode9','mode11'].forEach(id=>$(id).classList.remove('primary'));
   $('mode'+GAME_SIZE).classList.add('primary');
 }
@@ -1100,7 +1164,7 @@ function removeStarter(num){
   if(p.gk){p.gk=false;gkNum=null}
   render();
 }
-function toggleMatchSelection(num){if(matchStarted)return;const p=players.find(x=>x.num===num);if(!p)return;const max=GAME_SIZE===11?18:14;if(!p.selected&&players.filter(x=>x.selected).length>=max){msg('Maximum de '+max+' joueuses convoquées pour ce format.');return}p.selected=!p.selected;p.on=false;render()}
+function toggleMatchSelection(num){if(matchStarted)return;const p=players.find(x=>x.num===num);if(!p)return;const max=maxConvokedForTeam(teamKey);if(!p.selected&&players.filter(x=>x.selected).length>=max){msg('Maximum de '+max+' joueuses convoquées pour ce format.');return}p.selected=!p.selected;p.on=false;render()}
 function enforceGoalkeeperInvariant(){
  if(!matchStarted)return true;
  const k=players.find(p=>p.gk);
@@ -1112,9 +1176,7 @@ function enforceGoalkeeperInvariant(){
  return true;
 }
 function render(){
-  enforceGoalkeeperInvariant();
   const renderElapsed=displayElapsed();
-  persistMatchState();
   $('clock').textContent=fmt(matchClock(renderElapsed));
   $('score').textContent=isHome?scoreUSCM+' — '+scoreOpp:scoreOpp+' — '+scoreUSCM;
   $('scoreLabel').textContent=isHome?'USCM — '+opponentLabel():opponentLabel()+' — USCM';
@@ -1151,10 +1213,10 @@ function resetMatchState(clearSaved=true){
 }
 function loadMatchRoster(){
   const roster=getTeamRoster();
-  const max=GAME_SIZE===11?18:14;
+  const max=maxConvokedForTeam(teamKey);
   players=roster.map(x=>({
     num:String(x[0]),name:String(x[1]),gk:false,on:false,
-    selected:false,ejected:false,yellows:0,segs:[]
+    selected:false,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,_timingV367:true,segs:[]
   }));
   matchRoster=roster.map(x=>({num:String(x[0]),name:String(x[1])}));
 }
@@ -1162,48 +1224,52 @@ function selectTeam(k){
   if(matchStarted||running){msg('L’équipe ne peut plus être modifiée après le début du match.');return}
   if(k!=='one' && k!=='plus28')return;
   teamKey=k;
-  GAME_SIZE=(teamKey==='one')?11:7;
+  GAME_SIZE=defaultGameSizeForTeam(teamKey);
   if(!restoreSavedMatchState()){
     resetMatchState();
-    GAME_SIZE=(teamKey==='one')?11:7;
+    GAME_SIZE=defaultGameSizeForTeam(teamKey);
     loadMatchRoster();
   }
   syncTeamFormatUI();
   render();
 }
 function setMode(size){
-  if(teamKey==="one" && size!==11){msg("La Une féminine joue obligatoirement à 11.");return}
+  if(!isAllowedGameSize(teamKey,size)){
+    msg(teamKey==='one'?'La Une féminine joue obligatoirement à 11.':'Les Femmes 28+ jouent uniquement à 7 ou 9.');
+    return;
+  }
   if(matchStarted||running){msg('Le format ne peut plus être modifié après le début du match.');return}
-  GAME_SIZE=size;
+  GAME_SIZE=Number(size);
   clearSavedMatchState();
-  players.forEach(p=>{p.on=false;p.selected=false;p.ejected=false;p.yellows=0;p.segs=[]});
+  players.forEach(p=>{p.on=false;p.selected=false;p.ejected=false;p.yellows=0;p.playedBase=0;p.onSinceElapsed=null;p.onSinceWallMs=null;p._timingV367=true;p.segs=[]});
   selectedOut=null;runningSinceWallMs=0;half2StartElapsed=0;history=[];events=[];subEvents=[];finished=false;pendingEvent=null;scoreUSCM=0;scoreOpp=0;matchStarted=false;gkNum=null;
   syncTeamFormatUI();
   loadMatchRoster();
   render();
 }
 function selectStarter(num){if(matchStarted)return;const p=players.find(x=>x.num===num);if(!p||p.on||!p.selected)return;if(players.filter(x=>x.on).length>=GAME_SIZE){msg('Les '+GAME_SIZE+' titulaires sont déjà sélectionnées.');return}p.on=true;render()}
-function changeGoalkeeper(num){const np=players.find(x=>x.num===num);if(!np||np.ejected)return;if(!matchStarted){if(!np.selected){msg('Convoque d’abord cette joueuse.');return}players.forEach(p=>p.gk=false);np.gk=true;gkNum=num;render();return}if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche pour changer de gardienne.');return}if(running)tick();const old=players.find(p=>p.gk&&!p.ejected);if(old&&old.num===num)return;if(!old){np.gk=true;gkNum=num;render();return}
+function changeGoalkeeper(num){const np=players.find(x=>x.num===num);if(!np||np.ejected)return;if(!matchStarted){if(!np.selected){msg('Convoque d’abord cette joueuse.');return}players.forEach(p=>p.gk=false);np.gk=true;gkNum=num;render();return}if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche pour changer de gardienne.');return}if(running)tick();if(running)commitPlayerTimes(effectiveElapsed());const old=players.find(p=>p.gk&&!p.ejected);if(old&&old.num===num)return;if(!old){np.gk=true;gkNum=num;render();return}
  // If the new keeper is on the bench, treat it as a real substitution. If already on the field, only transfer the keeper role.
- if(!np.on){const s=activeSeg(old);if(s)s.end=elapsed;old.on=false;old.gk=false;np.on=true;np.gk=true;np.segs.push({start:elapsed,end:null});addSub(old.name,np.name)}else{old.gk=false;np.gk=true}
+ if(!np.on){const now=serverNowMs();stopPlayerTiming(old,effectiveElapsed());old.on=false;old.gk=false;np.on=true;np.gk=true;startPlayerTiming(np,effectiveElapsed());addSub(old.name,np.name)}else{old.gk=false;np.gk=true}
 gkNum=num;render();persistMatchState(true);msg(np.name+' est maintenant la gardienne.');}
-function chooseOut(num){if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche.');return}if(running)tick();const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg('Change d’abord de gardienne avant de la faire sortir.');return}const s=activeSeg(p);if(s)s.end=elapsed;p.on=false;selectedOut=num;render();persistMatchState(true)}
-function chooseIn(num){if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche.');return}if(selectedOut===null){msg('Choisis d’abord la joueuse qui sort.');return}const inn=players.find(x=>x.num===num),out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on||inn.ejected)return;if(players.filter(p=>p.on).length>=GAME_SIZE){msg('Il faut une sortie avant une entrée.');return}if(running)tick();inn.on=true;inn.segs.push({start:elapsed,end:null});history.push({out:selectedOut,inn:num,time:elapsed});addSub(out.name,inn.name);selectedOut=null;render();persistMatchState(true)}
+function chooseOut(num){if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche.');return}if(running)tick();if(running)commitPlayerTimes(effectiveElapsed());const p=players.find(x=>x.num===num);if(!p||!p.on)return;if(p.gk){msg('Change d’abord de gardienne avant de la faire sortir.');return}const now=serverNowMs();stopPlayerTiming(p,effectiveElapsed());p.on=false;selectedOut=num;render();persistMatchState(true)}
+function chooseIn(num){if(!matchStarted){msg('Le match doit avoir commencé.');return}if(!running&&half!==2){msg('Le chrono doit être en marche.');return}if(selectedOut===null){msg('Choisis d’abord la joueuse qui sort.');return}const inn=players.find(x=>x.num===num),out=players.find(x=>x.num===selectedOut);if(!inn||!out||inn.on||inn.ejected)return;if(players.filter(p=>p.on).length>=GAME_SIZE){msg('Il faut une sortie avant une entrée.');return}if(running)tick();const now=serverNowMs();commitPlayerTimes(effectiveElapsed());inn.on=true;startPlayerTiming(inn,effectiveElapsed());history.push({out:selectedOut,inn:num,time:elapsed});addSub(out.name,inn.name);selectedOut=null;render();persistMatchState(true)}
 
-function startMatch(){if(finished){msg('Match terminé. Utilise Nouveau pour recommencer.');return}if(running)return;if(!opponentName.trim()){msg('Saisis le nom de l’équipe adverse avant de démarrer.');$('opponentName').focus();return}const max=GAME_SIZE===11?18:14;const selectedCount=players.filter(p=>p.selected).length;const onCount=players.filter(p=>p.on&&!p.ejected).length;if(selectedCount>max){msg('Maximum de '+max+' joueuses convoquées.');return}if(half===1&&onCount!==GAME_SIZE){msg('Sélectionne exactement '+GAME_SIZE+' titulaires avant de démarrer.');return}if(half===2&&(onCount<1||onCount>GAME_SIZE)){msg('La 2e mi-temps reprend avec les joueuses encore autorisées à jouer.');return}const keeper=players.find(p=>p.gk);if(!keeper||!keeper.selected||!keeper.on||keeper.ejected){msg('Désigne une gardienne convoquée et présente sur le terrain avant de démarrer.');return}matchStarted=true;
+function startMatch(){if(finished){msg('Match terminé. Utilise Nouveau pour recommencer.');return}if(running)return;if(!isAllowedGameSize(teamKey,GAME_SIZE)){GAME_SIZE=defaultGameSizeForTeam(teamKey);syncTeamFormatUI();msg(teamKey==='one'?'La Une féminine doit jouer à 11.':'Les Femmes 28+ doivent jouer à 7 ou 9.');return}if(!opponentName.trim()){msg('Saisis le nom de l’équipe adverse avant de démarrer.');$('opponentName').focus();return}const max=maxConvokedForTeam(teamKey);const selectedCount=players.filter(p=>p.selected).length;const onCount=players.filter(p=>p.on&&!p.ejected).length;if(selectedCount>max){msg('Maximum de '+max+' joueuses convoquées.');return}if(half===1&&onCount!==GAME_SIZE){msg('Sélectionne exactement '+GAME_SIZE+' titulaires avant de démarrer.');return}if(half===2&&(onCount<1||onCount>GAME_SIZE)){msg('La 2e mi-temps reprend avec les joueuses encore autorisées à jouer.');return}const keeper=players.find(p=>p.gk);if(!keeper||!keeper.selected||!keeper.on||keeper.ejected){msg('Désigne une gardienne convoquée et présente sur le terrain avant de démarrer.');return}matchStarted=true;
 running=true;
 runningSinceWallMs=serverNowMs();
-players.filter(p=>p.on&&!p.ejected&&!activeSeg(p)).forEach(p=>p.segs.push({start:elapsed,end:null}));
-timer=setInterval(()=>render(),500);
-render();
+const startElapsed=effectiveElapsed();
+players.forEach(p=>{ensurePlayerTiming(p);if(p.on&&!p.ejected)startPlayerTiming(p,startElapsed);});
+timer=setInterval(()=>{render();if(running)persistMatchState(false)},500);
 persistMatchState(true);
+render();
 }
-function pauseMatch(){if(finished||!running)return;tick();running=false;clearInterval(timer);players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed});render();persistMatchState(true)}
+function pauseMatch(){if(finished||!running)return;tick();const now=serverNowMs();commitPlayerTimes(effectiveElapsed());running=false;runningSinceWallMs=0;clearInterval(timer);players.forEach(p=>{if(p.on)stopPlayerTiming(p,effectiveElapsed())});render();persistMatchState(true)}
 function halfMatch(){
  if(finished||!matchStarted||half!==1)return;
  if(running){
-  tick();running=false;runningSinceWallMs=0;clearInterval(timer);
-  players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed})
+  tick();const now=serverNowMs();commitPlayerTimes(effectiveElapsed());running=false;runningSinceWallMs=0;clearInterval(timer);
+  players.forEach(p=>{if(p.on)stopPlayerTiming(p,effectiveElapsed())})
  }
  half2StartElapsed=elapsed;
  half=2;selectedOut=null;render();persistMatchState(true);
@@ -1214,6 +1280,7 @@ function recordPlayerEvent(num,forcedType=null){
   const type=forcedType||pendingEvent;
   if(!p||!type)return;
   tick();
+  if(running)commitPlayerTimes(effectiveElapsed());
   if(type==='yellow'){
     p.yellows=Number(p.yellows||0)+1;
     if(p.yellows===1){
@@ -1221,14 +1288,14 @@ function recordPlayerEvent(num,forcedType=null){
       msg(p.name+' reçoit un carton jaune.');
     }else{
       p.ejected=true;
-      const s=activeSeg(p);if(s)s.end=elapsed;
+      const now=serverNowMs();stopPlayerTiming(p,effectiveElapsed());
       p.on=false;
       addEvent('red',p,'carton rouge — 2e carton jaune');
       msg(p.name+' reçoit un 2e jaune : rouge automatique, exclusion définitive.');
     }
   }else if(type==='red'){
     p.ejected=true;
-    const s=activeSeg(p);if(s)s.end=elapsed;
+    const now=serverNowMs();stopPlayerTiming(p,effectiveElapsed());
     p.on=false;
     addEvent('red',p,'carton rouge');
     msg(p.name+' est exclue définitivement. Aucun remplacement.');
@@ -1261,7 +1328,7 @@ function resetCurrentTeamToBase(){
   teams[teamKey]=cloneTeams(base[teamKey]);
   saveTeams();
   resetMatchState(true);
-  GAME_SIZE=(teamKey==='one')?11:7;
+  GAME_SIZE=defaultGameSizeForTeam(teamKey);
   loadMatchRoster();
   syncTeamFormatUI();
   render();
@@ -1281,7 +1348,7 @@ function syncPlayersAfterPermanentRosterChange(oldKey=null,newKey=null){
    const key=String(num)+'|'+String(name);
    const p=byKey.get(key);
    if(p)return p;
-   return {num:String(num),name:String(name),gk:false,on:false,selected:false,ejected:false,yellows:0,segs:[]};
+   return {num:String(num),name:String(name),gk:false,on:false,selected:false,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,_timingV367:true,segs:[]};
  });
  const tempPlayers=players.filter(p=>{
    const key=String(p.num)+'|'+String(p.name);
@@ -1349,7 +1416,7 @@ function addRoster(){
  renderRosterModal();render();
 }
 // Temporary match-only player and temporary jersey change.
-function addMatchPlayer(){if(matchStarted||running){msg('Impossible après le début du match.');return}const name=prompt('Prénom de la joueuse ajoutée pour ce match uniquement');if(name===null||!name.trim())return;const num=prompt('Numéro de maillot pour ce match');if(num===null||!num.trim())return;if(players.some(p=>p.num===num.trim())){msg('Ce numéro est déjà utilisé pour ce match.');return}const max=GAME_SIZE===11?18:14;players.push({num:num.trim(),name:name.trim(),gk:false,on:false,selected:players.filter(p=>p.selected).length<max,ejected:false,yellows:0,segs:[]});render()}
+function addMatchPlayer(){if(matchStarted||running){msg('Impossible après le début du match.');return}const name=prompt('Prénom de la joueuse ajoutée pour ce match uniquement');if(name===null||!name.trim())return;const num=prompt('Numéro de maillot pour ce match');if(num===null||!num.trim())return;if(players.some(p=>p.num===num.trim())){msg('Ce numéro est déjà utilisé pour ce match.');return}const max=maxConvokedForTeam(teamKey);players.push({num:num.trim(),name:name.trim(),gk:false,on:false,selected:players.filter(p=>p.selected).length<max,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,_timingV367:true,segs:[]});render()}
 function startNew(){
   if(!confirm('Réinitialiser le match ? Le contingent permanent ne sera pas modifié.'))return;
   // A new match must start from the CURRENT permanent contingent, never from a
@@ -1357,7 +1424,7 @@ function startNew(){
   resetMatchState(true);
   loadTeams();
   teams=loadTeams();
-  GAME_SIZE=(teamKey==='one')?11:7;
+  GAME_SIZE=defaultGameSizeForTeam(teamKey);
   loadMatchRoster();
   // If this match is shared, replace the old shared match state atomically from
   // the freshly loaded permanent roster so the other device also starts clean.
@@ -1367,7 +1434,7 @@ function startNew(){
   }
   render();
 }
-function undoChange(){if(finished){msg('Le match est terminé.');return}if(!history.length){msg('Aucun changement à annuler.');return}const h=history.pop(),inn=players.find(p=>p.num===h.inn),out=players.find(p=>p.num===h.out);if(inn){const s=activeSeg(inn);if(s)s.end=h.time;inn.on=false}if(out){out.on=true;out.segs.push({start:h.time,end:null})}const i=subEvents.findIndex(e=>e.time===h.time&&e.out===out.name&&e.inn===inn.name);if(i>=0)subEvents.splice(i,1);selectedOut=null;render();persistMatchState(true)}
+function undoChange(){if(finished){msg('Le match est terminé.');return}if(!history.length){msg('Aucun changement à annuler.');return}const h=history.pop(),inn=players.find(p=>p.num===h.inn),out=players.find(p=>p.num===h.out);if(running)commitPlayerTimes(effectiveElapsed());if(inn){stopPlayerTiming(inn,effectiveElapsed());inn.on=false}if(out){out.on=true;startPlayerTiming(out,effectiveElapsed())}const i=subEvents.findIndex(e=>e.time===h.time&&e.out===out.name&&e.inn===inn.name);if(i>=0)subEvents.splice(i,1);selectedOut=null;render();persistMatchState(true)}
 $('modalGrid').addEventListener('click',e=>{
   const b=e.target.closest('button[data-pnum]');
   if(!b||!$('playerModal').classList.contains('open'))return;
@@ -1380,17 +1447,19 @@ $('modalGrid').addEventListener('click',e=>{
 });
 $('opponentName').addEventListener('input',e=>{if(!matchStarted&&!running){opponentName=e.target.value;render()}});
 $('matchDate').addEventListener('change',e=>{if(!matchStarted&&!running){matchDate=e.target.value;render()}});
-$('start').onclick=startMatch;$('pause').onclick=pauseMatch;$('half').onclick=halfMatch;$('undo').onclick=undoChange;$('new').onclick=startNew;$('finish').onclick=finishMatch;$('finish').addEventListener('click',finishMatch);$('recapBtn').onclick=showRecap;$('printRecap').onclick=()=>window.print();$('backBtn').onclick=hideRecap;$('homeBtn').onclick=()=>{if(matchStarted||running){msg('Le lieu ne peut plus être modifié après le début du match.');return}isHome=true;render()};$('awayBtn').onclick=()=>{if(matchStarted||running){msg('Le lieu ne peut plus être modifié après le début du match.');return}isHome=false;render()};$('teamOne').onclick=()=>selectTeam('one');$('team28').onclick=()=>selectTeam('plus28');$('manageRoster').onclick=openRoster;$('rosterClose').onclick=()=>$('rosterModal').classList.remove('open');$('addPlayer').onclick=addRoster;$('modalCancel').onclick=()=>{$('playerModal').classList.remove('open');pendingEvent=null};document.querySelectorAll('[data-event]').forEach(b=>b.onclick=()=>b.dataset.event==='opp'?recordOppGoal():openPlayerModal(b.dataset.event));$('mode7').onclick=()=>setMode(7);$('mode9').onclick=()=>setMode(9);$('mode11').onclick=()=>setMode(11);
+$('start').onclick=startMatch;$('pause').onclick=pauseMatch;$('half').onclick=halfMatch;$('undo').onclick=undoChange;$('new').onclick=startNew;$('finish').onclick=finishMatch;$('finish').addEventListener('click',finishMatch);$('recapBtn').onclick=showRecap;$('printRecap').onclick=()=>window.print();$('backBtn').onclick=hideRecap;$('homeBtn').onclick=()=>{if(matchStarted||running){msg('Le lieu ne peut plus être modifié après le début du match.');return}isHome=true;render()};$('awayBtn').onclick=()=>{if(matchStarted||running){msg('Le lieu ne peut plus être modifié après le début du match.');return}isHome=false;render()};$('teamOne').onclick=()=>selectTeam('one');$('team28').onclick=()=>selectTeam('plus28');$('manageRoster').onclick=openRoster;$('rosterClose').onclick=()=>$('rosterModal').classList.remove('open');$('addPlayer').onclick=addRoster;$('modalCancel').onclick=()=>{$('playerModal').classList.remove('open');pendingEvent=null};document.querySelectorAll('[data-event]').forEach(b=>b.onclick=()=>b.dataset.event==='opp'?recordOppGoal():openPlayerModal(b.dataset.event));$('mode7').onclick=()=>{if(teamKey==='one')return;setMode(7)};$('mode9').onclick=()=>{if(teamKey==='one')return;setMode(9)};$('mode11').onclick=()=>{if(teamKey!=='one')return;setMode(11)};
 function finishMatch(){
   if(finished)return;
   if(running){
     tick();
+    const now=serverNowMs();
+    commitPlayerTimes(now);
     running=false;
     runningSinceWallMs=0;
     clearInterval(timer);
-    players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed});
+    players.forEach(p=>{if(p.on)stopPlayerTiming(p,effectiveElapsed())});
   }else{
-    players.filter(p=>p.on).forEach(p=>{const s=activeSeg(p);if(s)s.end=elapsed});
+    players.forEach(p=>{if(p.on)stopPlayerTiming(p,effectiveElapsed())});
   }
   finished=true;
   selectedOut=null;
