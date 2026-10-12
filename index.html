@@ -210,6 +210,19 @@ button:disabled{opacity:.42}
 }
 
 .player.zeroPlay{border:2px solid #d33!important;background:#fff1f1!important}
+/* V36.10: easier, high-contrast bench cards during live substitutions. */
+.player.substituteReady{border:2px solid #18864b!important;background:linear-gradient(180deg,#f0fff5 0%,#ffffff 100%)!important;box-shadow:0 2px 5px rgba(10,90,45,.12)}
+.player.substituteReady .num{background:#d9fbe5!important;color:#075c31!important;width:36px;height:36px;font-size:18px;font-weight:950}
+.player.substituteReady .name{font-size:15px!important;font-weight:950!important;color:#123d27!important}
+.player.substituteReady .time{font-size:17px!important;font-weight:950!important}
+.player.substituteReady .badge{background:#d9fbe5!important;color:#075c31!important;font-size:10px!important;font-weight:900!important}
+.player.substituteReady .subrow{margin-top:4px!important}
+.player.substituteReady .progress{height:5px!important}
+.player.substituteReady .preMatchActions button{background:#147a42!important;color:#fff!important;border:0!important;min-height:42px!important;font-size:13px!important;font-weight:950!important;border-radius:9px!important}
+.player.substituteReady .preMatchActions button:disabled{background:#a8b8ae!important;color:#fff!important}
+.player.substituteReady .row{align-items:center}
+#bench .player.substituteReady{padding:8px!important;margin-bottom:3px!important}
+#bench .player.substituteReady .inlinePlayerActions{flex-shrink:0}
 .player.zeroPlay .time{color:#c00!important;font-weight:950}
 
 .preMatchActions{display:flex;gap:4px;flex-wrap:wrap;margin-top:2px}
@@ -724,6 +737,10 @@ function queueCloudSync(immediate=false){
 }
 function applyCloudState(saved){
   if(!saved||saved.version!==1)return false;
+  // V36.10: discard any delayed local snapshot queued before this remote update.
+  // Otherwise an older local events/substitutions array could be sent just after
+  // the fresh Firebase state arrives and overwrite the other phone's latest entry.
+  if(cloudTimer){clearTimeout(cloudTimer);cloudTimer=null}
   const uiPendingEvent = pendingEvent;
   const uiPlayerModalOpen = $('playerModal')?.classList.contains('open');
   cloudApplying=true;
@@ -862,7 +879,7 @@ function persistMatchState(immediate=false){
   if(saveMatchTimer){clearTimeout(saveMatchTimer);saveMatchTimer=null}
   const write=()=>{
     try{localStorage.setItem(matchStateKey(),JSON.stringify(serializeMatchState()))}catch(e){}
-    queueCloudSync(false);
+    queueCloudSync(immediate);
   };
   if(immediate) write();
   else saveMatchTimer=setTimeout(()=>{saveMatchTimer=null;write()},250);
@@ -999,8 +1016,9 @@ function ensurePlayerTiming(p){
 
   let base=Math.max(0,Number(p.playedBase)||0);
   let activeStart=null;
-  if(Array.isArray(p.segs)){
-    for(const x of p.segs){
+  const legacySegments=Array.isArray(p.segs)?p.segs:[];
+  if(legacySegments.length){
+    for(const x of legacySegments){
       const st=Number(x?.start);
       const en=x?.end===null?null:Number(x?.end);
       if(!Number.isFinite(st)) continue;
@@ -1014,6 +1032,9 @@ function ensurePlayerTiming(p){
     else p.onSinceElapsed=effectiveElapsed();
   }else p.onSinceElapsed=null;
   p.playedBase=base;
+  // V36.10: the legacy segments have now been folded into playedBase. Clear
+  // them immediately so each Firebase/local restore cannot add them again.
+  p.segs=[];
   p._timingV367=true;
 }
 function commitPlayerTimes(e=effectiveElapsed()){
@@ -1052,7 +1073,7 @@ function played(p,e=effectiveElapsed()){
 }
 function mm(p,e=effectiveElapsed()){const secs=played(p,e);return secs>0?Math.ceil(secs/60):0}
 function tick(){commitElapsed()}
-// V36.9: keep one reversible snapshot for the LAST completed action.
+// V36.10: keep one reversible snapshot for the LAST completed action.
 // The match clock itself is never rewound; only the action's state is restored.
 function cloneUndoPlayers(list){return JSON.parse(JSON.stringify((list||[]).map(p=>({
   num:String(p.num),name:String(p.name),gk:!!p.gk,on:!!p.on,selected:!!p.selected,ejected:!!p.ejected,
@@ -1153,7 +1174,7 @@ function renderList(el,list,onfield,renderElapsed=effectiveElapsed()){
  if(!visible.length){el.innerHTML='<div class="notice">'+(matchStarted?'Aucune joueuse convoquée dans cette zone.':'Aucune joueuse dans cette zone.')+'</div>';return}
  visible.forEach(p=>{
   const m=mm(p,renderElapsed),target=p.gk?60:30,rem=Math.max(0,target-m),d=document.createElement('div');
-  d.className='player '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected ':'')+(!p.selected&&!p.on?'unselected ':'')+(matchStarted&&p.selected&&played(p,renderElapsed)<=0?'zeroPlay':'');
+  d.className='player '+(p.on?'on ':'')+(p.gk?'gk ':'')+(p.ejected?'ejected ':'')+(!p.selected&&!p.on?'unselected ':'')+(matchStarted&&p.selected&&played(p,renderElapsed)<=0?'zeroPlay ':'')+(matchStarted&&p.selected&&!p.on&&!p.ejected?'substituteReady':'');
   d.innerHTML='<div class="row"><div class="num">'+esc(p.num)+'</div><div class="name">'+esc(p.name)+playerBadges(p)+'</div><div class="time">'+m+'′</div></div><div class="subrow"><div><span class="badge">'+(p.gk?'🧤 GARDIENNE':p.on?'SUR LE TERRAIN':p.selected?'BANC':'NON CONVOQUÉE')+'</span> <span class="remaining">'+(p.gk?'objectif 60′':p.ejected?'EXCLUE':p.selected?'minimum 30′ • reste '+rem+'′':'à convoquer')+'</span></div></div><div class="progress"><div class="fill" style="width:'+Math.min(100,m/60*100)+'%"></div></div>';
   const actions=document.createElement('div');
   actions.className='preMatchActions';
@@ -1185,8 +1206,9 @@ function renderList(el,list,onfield,renderElapsed=effectiveElapsed()){
     }
   }else{
     const b=document.createElement('button');
-    b.textContent=onfield?'SORTIE':'ENTRÉE';
+    b.textContent=onfield?'SORTIE':(selectedOut!==null?'➜ FAIRE ENTRER':'ENTRÉE');
     b.disabled=(!running&&half!==2)||(!onfield&&selectedOut===null)||!p.selected;
+    if(!onfield){b.style.minHeight='42px';b.style.fontSize='13px';b.style.fontWeight='950'}
     b.onclick=()=>onfield?chooseOut(p.num):chooseIn(p.num);
     actions.appendChild(b);
   }
@@ -1453,9 +1475,19 @@ function editRosterByNum(oldNum){
    persistMatchState(true);
    msg('Modification définitive enregistrée.');
  }else{
-   const cur=players.find(x=>String(x.num)+'|'+String(x.name)===oldKey);
-   if(cur){if(players.some(x=>x!==cur&&String(x.num)===newNum)){msg('Ce numéro existe déjà pour ce match.');return}cur.num=newNum;cur.name=newName}
-   else{msg('La modification provisoire s’appliquera au prochain chargement du match.');}
+   // Provisional edits affect this match only, never the permanent contingent.
+   // Locate by the original jersey number first; the name may have been edited
+   // elsewhere on this pre-match screen.
+   const cur=players.find(x=>String(x.num)===String(oldNum));
+   if(players.some(x=>x!==cur&&String(x.num)===newNum)){msg('Ce numéro existe déjà pour ce match.');return}
+   if(cur){
+     cur.num=newNum;cur.name=newName;
+     matchRoster=matchRoster.map(x=>String(x.num)===String(oldNum)?{num:newNum,name:newName}:x);
+     persistMatchState(true);
+     msg('Modification provisoire enregistrée pour ce match uniquement.');
+   }else{
+     msg('Joueuse introuvable dans la feuille de match. Recharge le contingent avant de modifier son numéro.');return;
+   }
  }
  renderRosterModal();render();
 }
