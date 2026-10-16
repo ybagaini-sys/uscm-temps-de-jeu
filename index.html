@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>USCM — Temps de jeu</title>
-<meta name="uscm-build" content="V36.8-TEMPS-JEU-ROBUSTE">
+<meta name="uscm-build" content="V36.12-CONTINGENT-CONSOLIDE">
 <link rel="manifest" href="./manifest.webmanifest">
 <meta name="theme-color" content="#f3f5f9">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -608,6 +608,12 @@ function cloneTeams(x){return JSON.parse(JSON.stringify(x))}
 function normalizeRoster(arr){
  return (Array.isArray(arr)?arr:[]).filter(x=>Array.isArray(x)&&x.length>=2&&String(x[1]).trim()).map(x=>[String(x[0]??'').trim(),String(x[1]).trim()]);
 }
+// Keep permanent identity separate from the match-only number/name shown to users.
+function rosterKey(num,name){return String(num??'').trim()+'|'+String(name??'').trim()}
+function permanentKeyFor(num,name){
+ const key=rosterKey(num,name);
+ return normalizeRoster(teams?.[teamKey]||[]).some(x=>rosterKey(x[0],x[1])===key)?key:null;
+}
 function sortRosterByNumber(arr){
   return normalizeRoster(arr).sort((a,b)=>{
     const na=Number(a[0]), nb=Number(b[0]);
@@ -652,6 +658,61 @@ function saveTeams(){
   teams.one=sortRosterByNumber(teams.one);
   teams.plus28=sortRosterByNumber(teams.plus28);
   localStorage.setItem(STORAGE,JSON.stringify(teams));
+}
+let permanentRosterSyncEnabled=false,permanentRosterSyncReady=false,permanentRosterSyncPromise=null,permanentRosterSyncInProgress=false;
+let firebaseBootstrapStarted=false;
+const permanentRosterRefs={},pendingPermanentRosterWrites={};
+function applyPermanentRosterSnapshot(k,arr){
+  if(!validRoster(arr))return false;
+  const next=sortRosterByNumber(arr);
+  if(JSON.stringify(next)===JSON.stringify(teams[k]))return true;
+  teams[k]=next;
+  try{localStorage.setItem(STORAGE,JSON.stringify(teams))}catch(e){}
+  // Roster edits are permitted only before kickoff. Reconcile by permanentKey
+  // so match-only edits cannot create duplicate or orphaned players.
+  if(teamKey===k&&!matchStarted&&!running){
+    syncPlayersAfterPermanentRosterChange();
+    if($('rosterModal')?.classList.contains('open'))renderRosterModal();
+    render();
+    persistMatchState(true);
+  }
+  return true;
+}
+function startPermanentRosterSync(){
+  if(permanentRosterSyncPromise)return permanentRosterSyncPromise;
+  if(!firebaseReady||!window.USCM_FIREBASE?.db)return Promise.resolve(false);
+  permanentRosterSyncEnabled=true;permanentRosterSyncInProgress=true;
+  const seed=cloneTeams(teams);
+  const keys=['one','plus28'];
+  permanentRosterSyncPromise=Promise.all(keys.map(k=>{
+    const ref=window.USCM_FIREBASE.db.ref('rosters/'+k);
+    permanentRosterRefs[k]=ref;
+    ref.on('value',snap=>{const v=snap.val();if(validRoster(v))applyPermanentRosterSnapshot(k,v)},()=>setSyncStatus('⚠️ Synchronisation du contingent impossible'));
+    // Seed only an empty/invalid central roster. Existing central values always win
+    // over stale localStorage from a different device.
+    return ref.transaction(current=>validRoster(current)?current:seed[k]).then(result=>{
+      const v=result?.snapshot?.val();if(validRoster(v))applyPermanentRosterSnapshot(k,v);
+      return !!result?.committed&&validRoster(v);
+    }).catch(()=>false);
+  })).then(results=>{
+    permanentRosterSyncReady=results.every(Boolean);
+    permanentRosterSyncInProgress=false;
+    permanentRosterSyncEnabled=permanentRosterSyncReady;
+    if(!permanentRosterSyncReady)setSyncStatus('⚠️ Contingent local — synchronisation à vérifier');
+    else ['one','plus28'].forEach(k=>{if(pendingPermanentRosterWrites[k])savePermanentRosterToCloud(k)});
+    return permanentRosterSyncReady;
+  });
+  return permanentRosterSyncPromise;
+}
+function savePermanentRosterToCloud(k=teamKey){
+  if(!permanentRosterSyncEnabled)return;
+  pendingPermanentRosterWrites[k]=sortRosterByNumber(teams[k]);
+  if(!permanentRosterSyncReady||!permanentRosterRefs[k])return;
+  const proposed=pendingPermanentRosterWrites[k];delete pendingPermanentRosterWrites[k];
+  permanentRosterRefs[k].transaction(current=>proposed).then(result=>{
+    const v=result?.snapshot?.val();
+    if(result?.committed&&validRoster(v))applyPermanentRosterSnapshot(k,v);
+  }).catch(()=>{pendingPermanentRosterWrites[k]=proposed;setSyncStatus('⚠️ Contingent enregistré localement — envoi impossible')});
 }
 function getTeamRoster(){
   return sortRosterByNumber(teams[teamKey]||[]);
@@ -714,7 +775,7 @@ function queueCloudSync(immediate=false){
       return;
     }
     const updates={};
-    const keys=['teams','GAME_SIZE','matchStarted','running','elapsed','runningSinceWallMs','half','half2StartElapsed','finished','selectedOut','history','events','subEvents','scoreUSCM','scoreOpp','isHome','opponentName','matchDate','gkNum'];
+    const keys=['GAME_SIZE','matchStarted','running','elapsed','runningSinceWallMs','half','half2StartElapsed','finished','selectedOut','history','events','subEvents','scoreUSCM','scoreOpp','isHome','opponentName','matchDate','gkNum'];
     keys.forEach(k=>{
       if(JSON.stringify(current[k])!==JSON.stringify(lastCloudState[k])) updates[k]=current[k];
     });
@@ -748,7 +809,7 @@ function applyCloudState(saved){
     // A shared match carries the permanent contingent. Use it as the common roster
     // for all devices, then rebuild the match players from that roster without
     // losing their time segments. Older rooms without `teams` keep the local roster.
-    if(saved.teams && validTeams(saved.teams)){
+    if(saved.teams && validTeams(saved.teams) && !permanentRosterSyncReady){
       teams={one:sortRosterByNumber(saved.teams.one),plus28:sortRosterByNumber(saved.teams.plus28)};
       try{localStorage.setItem(STORAGE,JSON.stringify(teams))}catch(e){}
     }
@@ -768,7 +829,12 @@ function applyCloudState(saved){
     pendingEvent = (uiPlayerModalOpen && uiPendingEvent) ? uiPendingEvent : null;
     scoreUSCM=Number(saved.scoreUSCM||0); scoreOpp=Number(saved.scoreOpp||0);
     isHome=saved.isHome!==false; opponentName=String(saved.opponentName||''); matchDate=String(saved.matchDate||localDateISO()); gkNum=saved.gkNum??null;
-    players=mergeRosterWithSaved(saved.players); players.forEach(ensurePlayerTiming); matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
+    players=mergeRosterWithSaved(saved.players);
+    if(hasImpossiblePlayerTimes())rebuildPlayerTimesFromHistory();
+    players.forEach(p=>ensurePlayerTiming(p,effectiveElapsed()));
+    matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
+    const normalizedPlayers=serializeMatchState().players;
+    const needsNormalization=JSON.stringify(normalizedPlayers)!==JSON.stringify(Array.isArray(saved.players)?saved.players:[]);
     clearInterval(timer);
     if(running){if(!runningSinceWallMs) runningSinceWallMs=Number(saved.savedAt||serverNowMs()); last=performance.now();timer=setInterval(()=>{render();if(running)persistMatchState(false)},500)}
     syncCode=normalizeSyncCode(saved.syncCode||syncCode);
@@ -777,6 +843,10 @@ function applyCloudState(saved){
     if($('syncCode'))$('syncCode').value=syncCode;
     syncTeamFormatUI(); render();
     setSyncStatus('☁️ Synchronisé',true);
+    // Push a one-time normalized snapshot (timing schema + provisional roster)
+    // only after the listener guard is released. This prevents legacy segments
+    // from being migrated again on every later Firebase update.
+    if(needsNormalization) Promise.resolve().then(()=>persistMatchState(true));
     return true;
   }finally{cloudApplying=false}
 }
@@ -786,9 +856,14 @@ function attachSync(code,createIfMissing=false){
   if(!firebaseReady||!window.USCM_FIREBASE?.db){msg('Firebase n’est pas encore prêt.');return}
   if(!firebaseAuthUser){
     setSyncStatus('☁️ Authentification…');
-    window.USCM_FIREBASE.auth.signInAnonymously().then(()=>attachSync(code,createIfMissing)).catch(()=>{setSyncStatus('⚠️ Authentification impossible');msg('Impossible de se connecter à Firebase.')});
+    window.USCM_FIREBASE.auth.signInAnonymously().then(()=>startPermanentRosterSync().finally(()=>attachSync(code,createIfMissing))).catch(()=>{setSyncStatus('⚠️ Authentification impossible');msg('Impossible de se connecter à Firebase.')});
     return;
   }
+  if(!permanentRosterSyncEnabled){
+    startPermanentRosterSync().finally(()=>attachSync(code,createIfMissing));
+    return;
+  }
+  if(syncRef&&syncCode===code&&syncListening)return;
   if(syncRef){try{syncRef.off()}catch(e){}}
   syncCode=code;
   try{localStorage.setItem(SYNC_CODE_KEY,syncCode)}catch(e){}
@@ -832,7 +907,8 @@ function initSyncUI(){
     window.USCM_FIREBASE.db.ref('.info/serverTimeOffset').on('value',snap=>{ serverTimeOffset=Number(snap.val()||0); });
     window.USCM_FIREBASE.auth.onAuthStateChanged(u=>{
       firebaseAuthUser=u||null;
-      if(u){setSyncStatus('☁️ Connecté — local'); if(savedCode)attachSync(savedCode,false)}
+      if(u){setSyncStatus('☁️ Connecté — synchronisation du contingent…');startPermanentRosterSync().then(ok=>{setSyncStatus(ok?'☁️ Contingent synchronisé':'⚠️ Contingent local — synchronisation à vérifier',!!ok);if(savedCode)attachSync(savedCode,false)})}
+      else if(!firebaseBootstrapStarted){firebaseBootstrapStarted=true;window.USCM_FIREBASE.auth.signInAnonymously().catch(()=>setSyncStatus('⚠️ Contingent local — connexion Internet nécessaire pour synchroniser'));}
     });
   };
   if(window.USCM_FIREBASE?.ready)activateFirebase();
@@ -866,9 +942,9 @@ function serializeMatchState(){
     gkNum,
     lastAction:lastAction||null,
     players:players.map(p=>({
-      num:String(p.num), name:String(p.name), gk:!!p.gk, on:!!p.on,
+      num:String(p.num), name:String(p.name), permanentKey:p.permanentKey||null, gk:!!p.gk, on:!!p.on,
       selected:!!p.selected, ejected:!!p.ejected, yellows:Number(p.yellows||0),
-      playedBase:Number(p.playedBase||0), onSinceElapsed:p.onSinceElapsed==null?null:Number(p.onSinceElapsed), onSinceWallMs:null,
+      playedBase:Number(p.playedBase||0), onSinceElapsed:p.onSinceElapsed==null?null:Number(p.onSinceElapsed), onSinceWallMs:null, timingVersion:2,
       segs:Array.isArray(p.segs)?p.segs.map(x=>({start:Number(x.start||0),end:x.end===null?null:Number(x.end||0)})):[]
     })),
     savedAt:Date.now()
@@ -890,29 +966,22 @@ function clearSavedMatchState(k=teamKey){
 }
 
 function mergeRosterWithSaved(savedPlayers){
-  const roster=getTeamRoster();
-  const savedByNum=new Map((savedPlayers||[]).map(p=>[String(p.num),p]));
-  const rosterNums=new Set(roster.map(x=>String(x[0])));
-  const merged=roster.map(x=>{
-    const num=String(x[0]), name=String(x[1]), old=savedByNum.get(num);
-    return old ? {
-      num, name,
-      gk:!!old.gk,on:!!old.on,selected:!!old.selected,ejected:!!old.ejected,
-      yellows:Number(old.yellows||0), playedBase:Number(old.playedBase||0), onSinceElapsed:old.onSinceElapsed==null?null:Number(old.onSinceElapsed), onSinceWallMs:old.onSinceWallMs==null?null:Number(old.onSinceWallMs), _timingV367:false,
-      segs:Array.isArray(old.segs)?old.segs.map(z=>({start:Number(z.start||0),end:z.end===null?null:Number(z.end||0)})):[]
-    } : {num,name,gk:false,on:false,selected:false,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,_timingV367:true,segs:[]};
-  });
-  // Preserve temporary match-only players even though they are not in the permanent roster.
-  (savedPlayers||[]).forEach(p=>{
-    if(!rosterNums.has(String(p.num))){
-      merged.push({
-        num:String(p.num),name:String(p.name),gk:!!p.gk,on:!!p.on,selected:!!p.selected,
-        ejected:!!p.ejected,yellows:Number(p.yellows||0),playedBase:Number(p.playedBase||0),onSinceElapsed:p.onSinceElapsed==null?null:Number(p.onSinceElapsed),onSinceWallMs:p.onSinceWallMs==null?null:Number(p.onSinceWallMs),_timingV367:false,
-        segs:Array.isArray(p.segs)?p.segs.map(z=>({start:Number(z.start||0),end:z.end===null?null:Number(z.end||0)})):[]
-      });
-    }
-  });
-  return merged;
+  // The saved match roster is authoritative for THIS match. Do not rebuild it by
+  // matching jersey numbers against the permanent roster: a provisional number
+  // change would otherwise create a duplicate old player and lose the new number.
+  if(Array.isArray(savedPlayers) && savedPlayers.length){
+    return savedPlayers.map(p=>({
+      num:String(p.num),name:String(p.name),permanentKey:p.permanentKey||permanentKeyFor(p.num,p.name),gk:!!p.gk,on:!!p.on,selected:!!p.selected,
+      ejected:!!p.ejected,yellows:Number(p.yellows||0),
+      playedBase:Number(p.playedBase||0),
+      onSinceElapsed:p.onSinceElapsed==null?null:Number(p.onSinceElapsed),
+      onSinceWallMs:null,
+      timingVersion:Number(p.timingVersion||0),
+      _timingV367:Number(p.timingVersion||0)>=2,
+      segs:Array.isArray(p.segs)?p.segs.map(z=>({start:Number(z.start||0),end:z.end===null?null:Number(z.end||0)})):[]
+    }));
+  }
+  return getTeamRoster().map(x=>({num:String(x[0]),name:String(x[1]),permanentKey:rosterKey(x[0],x[1]),gk:false,on:false,selected:false,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,timingVersion:2,_timingV367:true,segs:[]}));
 }
 
 function restoreSavedMatchState(){
@@ -943,6 +1012,9 @@ function restoreSavedMatchState(){
   gkNum=saved.gkNum??null;
   lastAction=saved.lastAction||null;
   players=mergeRosterWithSaved(saved.players);
+  const repairedPlayerTimes=hasImpossiblePlayerTimes();
+  if(repairedPlayerTimes)rebuildPlayerTimesFromHistory();
+  players.forEach(p=>ensurePlayerTiming(p,effectiveElapsed()));
   matchRoster=players.map(p=>({num:String(p.num),name:String(p.name)}));
 
   // The running clock is based on wall-clock/server time, not on JavaScript timer ticks.
@@ -954,6 +1026,7 @@ function restoreSavedMatchState(){
     timer=setInterval(()=>render(),500);
   }
   restoredMatchState=true;
+  if(repairedPlayerTimes)persistMatchState(true);
   return true;
 }
 
@@ -1005,42 +1078,51 @@ function commitElapsed(){
 // V36.8: player time is derived from the match clock and presence anchor.
 // This is deliberately independent from setInterval/render ticks. The display
 // can be suspended by iPadOS without stopping the actual time calculation.
-function ensurePlayerTiming(p){
+function ensurePlayerTiming(p,limit=effectiveElapsed()){
   if(!p)return;
-  // V36.8: one authoritative local timing model.
-  // playedBase = seconds already completed on the field.
-  // onSinceElapsed = match elapsed second at which the current spell started.
-  if(!Number.isFinite(Number(p.playedBase))) p.playedBase=0;
-  if(p.onSinceElapsed===undefined) p.onSinceElapsed=null;
-  if(p._timingV367) return;
-
+  limit=Math.max(0,Number(limit)||0);
+  if(!Number.isFinite(Number(p.playedBase)))p.playedBase=0;
+  if(p.onSinceElapsed===undefined)p.onSinceElapsed=null;
+  const alreadyV2=Number(p.timingVersion||0)>=2 || p._timingV367===true;
   let base=Math.max(0,Number(p.playedBase)||0);
   let activeStart=null;
   const legacySegments=Array.isArray(p.segs)?p.segs:[];
-  if(legacySegments.length){
+  if(!alreadyV2 && legacySegments.length){
+    let segmentTotal=0;
     for(const x of legacySegments){
       const st=Number(x?.start);
       const en=x?.end===null?null:Number(x?.end);
-      if(!Number.isFinite(st)) continue;
-      if(en===null){ activeStart=st; }
-      else if(Number.isFinite(en)) base+=Math.max(0,en-st);
+      if(!Number.isFinite(st)||st<0)continue;
+      if(en===null){activeStart=st;continue;}
+      if(Number.isFinite(en)&&en>=st)segmentTotal+=en-st;
     }
+    // Legacy `segs` and `playedBase` are alternate representations in older
+    // builds, not additive ledgers. Adding them was the source of inflated totals.
+    // Keep the larger valid representation once, never sum both representations.
+    if(segmentTotal<=limit+1)base=base>limit+1?segmentTotal:Math.max(base,segmentTotal);
   }
+  let start=p.onSinceElapsed==null?null:Number(p.onSinceElapsed);
   if(p.on){
-    if(Number.isFinite(Number(p.onSinceElapsed))) activeStart=Number(p.onSinceElapsed);
-    else if(activeStart!==null) p.onSinceElapsed=activeStart;
-    else p.onSinceElapsed=effectiveElapsed();
-  }else p.onSinceElapsed=null;
+    if(!Number.isFinite(start))start=Number.isFinite(activeStart)?activeStart:limit;
+    start=Math.min(limit,Math.max(0,start));
+    // A player's completed minutes can only extend to the point she entered.
+    // This invariant prevents corrupted/stale data exceeding the match clock.
+    base=Math.min(base,start);
+    p.onSinceElapsed=start;
+  }else{
+    p.onSinceElapsed=null;
+    base=Math.min(base,limit);
+  }
   p.playedBase=base;
-  // V36.10: the legacy segments have now been folded into playedBase. Clear
-  // them immediately so each Firebase/local restore cannot add them again.
   p.segs=[];
+  p.timingVersion=2;
   p._timingV367=true;
 }
+
 function commitPlayerTimes(e=effectiveElapsed()){
   e=Math.max(0,Number(e)||0);
   for(const p of players){
-    ensurePlayerTiming(p);
+    ensurePlayerTiming(p,e);
     if(p.on){
       if(!Number.isFinite(Number(p.onSinceElapsed))) p.onSinceElapsed=e;
       const delta=Math.max(0,e-Number(p.onSinceElapsed));
@@ -1050,12 +1132,12 @@ function commitPlayerTimes(e=effectiveElapsed()){
   }
 }
 function startPlayerTiming(p,e=effectiveElapsed()){
-  ensurePlayerTiming(p);
+  ensurePlayerTiming(p,e);
   p.onSinceElapsed=Math.max(0,Number(e)||0);
   p._timingV367=true;
 }
 function stopPlayerTiming(p,e=effectiveElapsed()){
-  ensurePlayerTiming(p);
+  ensurePlayerTiming(p,e);
   if(p.on){
     if(!Number.isFinite(Number(p.onSinceElapsed))) p.onSinceElapsed=e;
     p.playedBase=Math.max(0,Number(p.playedBase)||0)+Math.max(0,e-Number(p.onSinceElapsed));
@@ -1063,13 +1145,62 @@ function stopPlayerTiming(p,e=effectiveElapsed()){
   p.onSinceElapsed=null;
   p._timingV367=true;
 }
+function hasImpossiblePlayerTimes(){
+  const e=Math.max(0,Number(effectiveElapsed())||0);
+  return players.some(p=>{
+    const base=Math.max(0,Number(p.playedBase)||0);
+    const start=p.onSinceElapsed==null?null:Number(p.onSinceElapsed);
+    const total=base+(p.on&&Number.isFinite(start)?Math.max(0,e-start):0);
+    return base>e+2 || total>e+2 || (p.on&&Number.isFinite(start)&&start>e+2);
+  });
+}
+function rebuildPlayerTimesFromHistory(){
+  // Recovery path for old/corrupt snapshots: reconstruct stints from substitution
+  // and red-card history instead of trusting inflated cached totals.
+  const end=Math.max(0,Number(effectiveElapsed())||0);
+  const byName=new Map(players.map(p=>[String(p.name),p]));
+  const subs=(Array.isArray(subEvents)?subEvents:[]).map((x,i)=>({kind:'sub',i,t:Number(x.elapsedTime),out:String(x.out||''),inn:String(x.inn||'')}))
+    .filter(x=>Number.isFinite(x.t)&&x.t>=0&&x.t<=end+2).sort((a,b)=>a.t-b.t||a.i-b.i);
+  const reds=(Array.isArray(events)?events:[]).filter(x=>x.type==='red').map((x,i)=>({kind:'red',i,t:Number(x.elapsedTime),name:String(x.name||'')}))
+    .filter(x=>Number.isFinite(x.t)&&x.t>=0&&x.t<=end+2).sort((a,b)=>a.t-b.t||a.i-b.i);
+  const first=new Map();
+  for(const x of subs){if(!first.has(x.out))first.set(x.out,{kind:'out',t:x.t});if(!first.has(x.inn))first.set(x.inn,{kind:'in',t:x.t});}
+  const candidates=new Set();
+  players.filter(p=>p.on).forEach(p=>candidates.add(String(p.name)));
+  subs.forEach(x=>candidates.add(x.out)); reds.forEach(x=>candidates.add(x.name));
+  const active=new Map(), totals=new Map(players.map(p=>[String(p.name),0]));
+  for(const name of candidates){
+    const f=first.get(name), hasRed=reds.some(x=>x.name===name), player=byName.get(name);
+    if(player && (!f || f.kind==='out') && (player.on || f?.kind==='out' || hasRed))active.set(name,0);
+  }
+  const timeline=[...subs,...reds].sort((a,b)=>a.t-b.t||((a.kind==='sub'?0:1)-(b.kind==='sub'?0:1))||a.i-b.i);
+  for(const x of timeline){
+    if(x.kind==='sub'){
+      if(active.has(x.out)){totals.set(x.out,(totals.get(x.out)||0)+Math.max(0,x.t-active.get(x.out)));active.delete(x.out)}
+      if(byName.has(x.inn)&&!byName.get(x.inn).ejected&&!active.has(x.inn))active.set(x.inn,x.t);
+    }else if(active.has(x.name)){
+      totals.set(x.name,(totals.get(x.name)||0)+Math.max(0,x.t-active.get(x.name)));active.delete(x.name);
+    }
+  }
+  const actual=new Set(players.filter(p=>p.on).map(p=>String(p.name)));
+  if(active.size!==actual.size||[...active.keys()].some(n=>!actual.has(n)))return false;
+  for(const p of players){
+    const name=String(p.name);p.playedBase=Math.max(0,Number(totals.get(name)||0));
+    p.onSinceElapsed=active.has(name)?Math.min(end,Math.max(0,Number(active.get(name)||0))):null;
+    p.segs=[];p.timingVersion=2;p._timingV367=true;
+    if(p.on)p.playedBase=Math.min(p.playedBase,Number(p.onSinceElapsed)||0);else p.playedBase=Math.min(p.playedBase,end);
+  }
+  return true;
+}
 function matchClock(e=effectiveElapsed()){return half===1?e:halfBaseSeconds()+Math.max(0,e-half2StartElapsed)}
 function played(p,e=effectiveElapsed()){
   if(!p)return 0;
-  ensurePlayerTiming(p);
+  e=Math.max(0,Number(e)||0);
+  ensurePlayerTiming(p,e);
   let n=Math.max(0,Number(p.playedBase)||0);
-  if(running && p.on && Number.isFinite(Number(p.onSinceElapsed))) n+=Math.max(0,Number(e)-Number(p.onSinceElapsed));
-  return n;
+  if(running && p.on && Number.isFinite(Number(p.onSinceElapsed))) n+=Math.max(0,e-Number(p.onSinceElapsed));
+  // Hard invariant: a player cannot have played longer than the elapsed match.
+  return Math.min(e,n);
 }
 function mm(p,e=effectiveElapsed()){const secs=played(p,e);return secs>0?Math.ceil(secs/60):0}
 function tick(){commitElapsed()}
@@ -1292,7 +1423,7 @@ function loadMatchRoster(){
   const roster=getTeamRoster();
   const max=maxConvokedForTeam(teamKey);
   players=roster.map(x=>({
-    num:String(x[0]),name:String(x[1]),gk:false,on:false,
+    num:String(x[0]),name:String(x[1]),permanentKey:rosterKey(x[0],x[1]),gk:false,on:false,
     selected:false,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,_timingV367:true,segs:[]
   }));
   matchRoster=roster.map(x=>({num:String(x[0]),name:String(x[1])}));
@@ -1414,7 +1545,7 @@ function recordOppGoal(){
 function resetCurrentTeamToBase(){
   const base=getBaseTeams();
   teams[teamKey]=cloneTeams(base[teamKey]);
-  saveTeams();
+  saveTeams();savePermanentRosterToCloud(teamKey);
   resetMatchState(true);
   GAME_SIZE=defaultGameSizeForTeam(teamKey);
   loadMatchRoster();
@@ -1422,32 +1553,31 @@ function resetCurrentTeamToBase(){
   render();
   msg('Contingent de base restauré pour '+(teamKey==='one'?'La Une féminine':'Femmes 28+')+'.');
 }
-function openRoster(){if(matchStarted||running){msg('Le contingent ne peut être modifié après le début du match.');return}renderRosterModal();$('rosterModal').classList.add('open')}
+function openRoster(){if(matchStarted||running){msg('Le contingent ne peut être modifié après le début du match.');return}if(permanentRosterSyncInProgress){msg('Synchronisation du contingent en cours. Réessaie dans quelques secondes.');return}renderRosterModal();$('rosterModal').classList.add('open')}
 function syncPlayersAfterPermanentRosterChange(oldKey=null,newKey=null){
- const roster=normalizeRoster(teams[teamKey]);
- const permanentKeys=new Set(roster.map(([num,name])=>String(num)+'|'+String(name)));
- const previousPermanent=new Set((matchRoster||[]).map(p=>String(p.num)+'|'+String(p.name)));
+ const roster=sortRosterByNumber(teams[teamKey]);
+ const byPermanentKey=new Map(),byVisibleKey=new Map();
+ players.forEach(p=>{if(p.permanentKey)byPermanentKey.set(String(p.permanentKey),p);byVisibleKey.set(rosterKey(p.num,p.name),p)});
+ // Permanent edits follow the origin key, even after a provisional edit changed
+ // the visible number/name for this match.
  if(oldKey&&newKey&&oldKey!==newKey){
-   const changed=players.find(p=>String(p.num)+'|'+String(p.name)===oldKey);
-   if(changed){const sep=newKey.indexOf('|');changed.num=newKey.slice(0,sep);changed.name=newKey.slice(sep+1)}
+   const changed=byPermanentKey.get(oldKey)||byVisibleKey.get(oldKey);
+   if(changed){const sep=newKey.indexOf('|');changed.num=newKey.slice(0,sep);changed.name=newKey.slice(sep+1);changed.permanentKey=newKey;byPermanentKey.set(newKey,changed);byVisibleKey.set(newKey,changed);}
  }
- const byKey=new Map(players.map(p=>[String(p.num)+'|'+String(p.name),p]));
  const synced=roster.map(([num,name])=>{
-   const key=String(num)+'|'+String(name);
-   const p=byKey.get(key);
-   if(p)return p;
-   return {num:String(num),name:String(name),gk:false,on:false,selected:false,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,_timingV367:true,segs:[]};
+   const key=rosterKey(num,name),p=byPermanentKey.get(key)||byVisibleKey.get(key);
+   if(p){p.permanentKey=key;return p;}
+   return {num:String(num),name:String(name),permanentKey:key,gk:false,on:false,selected:false,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,timingVersion:2,_timingV367:true,segs:[]};
  });
- const tempPlayers=players.filter(p=>{
-   const key=String(p.num)+'|'+String(p.name);
-   return !permanentKeys.has(key) && !previousPermanent.has(key);
- });
+ // Only players explicitly added for this match have no permanentKey.
+ const tempPlayers=players.filter(p=>!p.permanentKey);
  players=[...synced,...tempPlayers];
- matchRoster=roster.map(p=>({num:String(p[0]),name:String(p[1])}));
+ matchRoster=roster.map(([num,name])=>({num:String(num),name:String(name)}));
 }
+
 function renderRosterModal(){
  const t=sortRosterByNumber(teams[teamKey]);
- $('rosterModalInfo').textContent=(teamKey==='one'?'La Une féminine':'Femmes 28+')+' • '+t.length+' joueuses. N° et prénoms réels affichés ci-dessous. Les modifications définitives sont conservées après actualisation. Le contingent de base peut être restauré.';
+ $('rosterModalInfo').textContent=(teamKey==='one'?'La Une féminine':'Femmes 28+')+' • '+t.length+' joueuses. N° et prénoms réels affichés ci-dessous. D = permanent ; P = match uniquement. Une modification provisoire reste liée à sa joueuse d’origine.';
  $('rosterRows').innerHTML='<div class="rosterHead"><div>N°</div><div>Prénom</div><div>Modifier</div><div></div></div>'+t.map(p=>'<div class="player rosterRow" style="margin-top:3px"><div class="row"><div class="num">'+esc(p[0]||'—')+'</div><div class="name">'+esc(p[1])+'</div><button type="button" data-edit-num="'+esc(p[0])+'" style="min-height:26px">✏️ Modifier</button><button type="button" data-del-num="'+esc(p[0])+'" aria-label="Supprimer" title="Supprimer">🗑️</button></div></div>').join('');
  $('rosterRows').querySelectorAll('[data-edit-num]').forEach(b=>b.onclick=()=>editRosterByNum(b.dataset.editNum));
  $('rosterRows').querySelectorAll('[data-del-num]').forEach(b=>b.onclick=()=>deleteRosterByNum(b.dataset.delNum));
@@ -1458,63 +1588,54 @@ function renderRosterModal(){
 function editRosterByNum(oldNum){
  const idx=teams[teamKey].findIndex(p=>String(p[0])===String(oldNum));
  if(idx<0){msg('Joueuse introuvable dans le contingent.');return}
- const p=teams[teamKey][idx],oldKey=String(p[0])+'|'+String(p[1]);
+ const p=teams[teamKey][idx],oldKey=rosterKey(p[0],p[1]);
  const name=prompt('Prénom de la joueuse',p[1]);if(name===null)return;if(!name.trim()){msg('Le prénom est obligatoire.');return}
  const num=prompt('Nouveau numéro de maillot',p[0]||'');if(num===null||!num.trim())return;
- const scope=prompt('Modification du numéro :\nD = définitive (contingent)\nP = provisoire (ce match uniquement)','D');if(scope===null)return;
+ const scope=prompt('Portée de la modification :\nD = définitive (contingent permanent)\nP = provisoire (match uniquement)','D');if(scope===null)return;
  const mode=scope.trim().toUpperCase();if(mode!=='D'&&mode!=='P'){msg('Choisis D pour définitive ou P pour provisoire.');return}
- const newNum=num.trim(),newName=name.trim(),newKey=newNum+'|'+newName;
+ const newNum=num.trim(),newName=name.trim(),newKey=rosterKey(newNum,newName);
+ const cur=players.find(x=>x.permanentKey===oldKey)||players.find(x=>String(x.num)===String(oldNum));
+ if(players.some(x=>x!==cur&&String(x.num)===newNum)){msg('Ce numéro est déjà utilisé pour ce match.');return}
  if(mode==='D'){
    if(teams[teamKey].some((x,j)=>j!==idx&&String(x[0])===newNum)){msg('Ce numéro existe déjà dans ce contingent.');return}
-   teams[teamKey][idx]=[newNum,newName];
-   saveTeams();
-   // Re-read the just-saved permanent contingent so a subsequent New match or
-   // reload cannot fall back to a stale in-memory roster.
-   teams=loadTeams();
-   syncPlayersAfterPermanentRosterChange(oldKey,newKey);
-   persistMatchState(true);
-   msg('Modification définitive enregistrée.');
+   teams[teamKey][idx]=[newNum,newName];saveTeams();teams=loadTeams();savePermanentRosterToCloud(teamKey);
+   syncPlayersAfterPermanentRosterChange(oldKey,newKey);persistMatchState(true);
+   msg('Modification définitive enregistrée dans le contingent permanent.');
  }else{
-   // Provisional edits affect this match only, never the permanent contingent.
-   // Locate by the original jersey number first; the name may have been edited
-   // elsewhere on this pre-match screen.
-   const cur=players.find(x=>String(x.num)===String(oldNum));
-   if(players.some(x=>x!==cur&&String(x.num)===newNum)){msg('Ce numéro existe déjà pour ce match.');return}
-   if(cur){
-     cur.num=newNum;cur.name=newName;
-     matchRoster=matchRoster.map(x=>String(x.num)===String(oldNum)?{num:newNum,name:newName}:x);
-     persistMatchState(true);
-     msg('Modification provisoire enregistrée pour ce match uniquement.');
-   }else{
-     msg('Joueuse introuvable dans la feuille de match. Recharge le contingent avant de modifier son numéro.');return;
-   }
+   if(!cur){msg('Joueuse introuvable dans la feuille de match. Recharge le contingent avant de modifier.');return}
+   // permanentKey is deliberately retained so a later permanent edit or deletion
+   // still targets the same player, despite this match-only display change.
+   cur.num=newNum;cur.name=newName;persistMatchState(true);
+   msg('Modification provisoire enregistrée pour ce match uniquement.');
  }
  renderRosterModal();render();
 }
+
 function deleteRosterByNum(num){
  const idx=teams[teamKey].findIndex(p=>String(p[0])===String(num));
  if(idx<0){msg('Joueuse introuvable dans le contingent.');return}
  const p=teams[teamKey][idx];if(!confirm('Supprimer définitivement '+p[1]+' du contingent ?'))return;
- const oldKey=String(p[0])+'|'+String(p[1]);
- teams[teamKey].splice(idx,1);saveTeams();
- teams=loadTeams();
- players=players.filter(x=>String(x.num)+'|'+String(x.name)!==oldKey);
- syncPlayersAfterPermanentRosterChange();
- persistMatchState(true);
+ const oldKey=rosterKey(p[0],p[1]);
+ teams[teamKey].splice(idx,1);saveTeams();teams=loadTeams();savePermanentRosterToCloud(teamKey);
+ // Delete the permanent player even if her visible match identity is provisional.
+ players=players.filter(x=>x.permanentKey!==oldKey&&rosterKey(x.num,x.name)!==oldKey);
+ syncPlayersAfterPermanentRosterChange();persistMatchState(true);
  renderRosterModal();render();
 }
+
 function addRoster(){
  const name=prompt('Prénom de la nouvelle joueuse');if(name===null)return;const num=prompt('Numéro de maillot permanent');if(num===null)return;if(!name.trim()||!num.trim()){msg('Le prénom et le numéro sont obligatoires.');return}
  if(teams[teamKey].some(p=>String(p[0])===num.trim())){msg('Ce numéro existe déjà dans ce contingent.');return}
+ if(players.some(p=>String(p.num)===num.trim())){msg('Ce numéro est déjà utilisé dans la feuille de match. Modifie d’abord la joueuse concernée.');return}
  teams[teamKey].push([num.trim(),name.trim()]);
  saveTeams();
- teams=loadTeams();
+ teams=loadTeams();savePermanentRosterToCloud(teamKey);
  syncPlayersAfterPermanentRosterChange();
  persistMatchState(true);
  renderRosterModal();render();
 }
 // Temporary match-only player and temporary jersey change.
-function addMatchPlayer(){if(matchStarted||running){msg('Impossible après le début du match.');return}const name=prompt('Prénom de la joueuse ajoutée pour ce match uniquement');if(name===null||!name.trim())return;const num=prompt('Numéro de maillot pour ce match');if(num===null||!num.trim())return;if(players.some(p=>p.num===num.trim())){msg('Ce numéro est déjà utilisé pour ce match.');return}const max=maxConvokedForTeam(teamKey);players.push({num:num.trim(),name:name.trim(),gk:false,on:false,selected:players.filter(p=>p.selected).length<max,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,_timingV367:true,segs:[]});render()}
+function addMatchPlayer(){if(matchStarted||running){msg('Impossible après le début du match.');return}const name=prompt('Prénom de la joueuse ajoutée pour ce match uniquement');if(name===null||!name.trim())return;const num=prompt('Numéro de maillot pour ce match');if(num===null||!num.trim())return;if(players.some(p=>p.num===num.trim())){msg('Ce numéro est déjà utilisé pour ce match.');return}const max=maxConvokedForTeam(teamKey);players.push({num:num.trim(),name:name.trim(),permanentKey:null,gk:false,on:false,selected:players.filter(p=>p.selected).length<max,ejected:false,yellows:0,playedBase:0,onSinceElapsed:null,onSinceWallMs:null,timingVersion:2,_timingV367:true,segs:[]});render()}
 function startNew(){
   if(!confirm('Réinitialiser le match ? Le contingent permanent ne sera pas modifié.'))return;
   // A new match must start from the CURRENT permanent contingent, never from a
